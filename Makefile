@@ -13,6 +13,9 @@ OBJECT_FILES_NON_STANDARD := y
 obj-m += cpu_hotplug.o
 #cpu_hotplug-y := cpu_hotplug.o
 
+.PHONY: default
+default: debug-modules
+
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) clean
 
@@ -38,6 +41,7 @@ modules:
 
 modules_install:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules_install
+
 
 .PHONY: lint
 lint:
