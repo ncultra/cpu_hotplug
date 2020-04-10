@@ -1,7 +1,7 @@
 SHELL := /usr/bin/bash
 MAKE := /usr/bin/make
 
-INC_DIR := /usr/src/kernels/$(shell uname -r)/include/linux
+INC_DIR := /usr/src/kernels/$(shell uname -r)/include
 INC_PATH := -I. -I${INC_DIR}
 
 MY_CFLAGS = -c  -Wall -Werror -std=gnu11 -fms-extensions -nostdlib

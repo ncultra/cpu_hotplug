@@ -1,11 +1,13 @@
-//#include <stdint.h>
-#include <module.h>
-#include <printk.h>
-#include <cpu.h>
-#include <cpuhotplug.h>
-#include <net.h>
-#include <socket.h>
-#include <sched.h>
+#ifndef __CPU_HOTPLUG_H
+#define __CPU_HOTPLUG_H
+
+#include <linux/module.h>
+#include <linux/printk.h>
+#include <linux/cpu.h>
+#include <linux/cpuhotplug.h>
+#include <linux/sched.h>
+
+
 #define _MODULE_LICENSE "GPL v2"
 #define _MODULE_AUTHOR "Mike Day"
 #define _MODULE_INFO "cpu hot-plug demo"
@@ -75,3 +77,5 @@ EXPORT_SYMBOL(cpu_all_bits);
 
 
 ******/
+
+#endif /** __CPU_HOTPLUG_H **/
