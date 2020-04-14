@@ -7,8 +7,8 @@
 #include <linux/cpuhotplug.h>
 #include <linux/sched.h>
 
-int __init cpu_hotplug_init(void);
-void __exit cpu_hotplug_cleanup(void);
+int cpu_hotplug_init(void);
+void cpu_hotplug_cleanup(void);
 
 /**
 ****

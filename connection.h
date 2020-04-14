@@ -34,11 +34,10 @@ extern uint32_t protocol_version;
 #define _MODULE_AUTHOR "Mike Day"
 #define _MODULE_INFO "cpu hot-plug demo"
 
-
 #define assert(s) do { \
-		if (unlikely(!(s))) printk(KERN_DEBUG "assertion failed: " #s " at %s:%d\n", \
-					   __FILE__, __LINE__);		\
-  } while(0)
+	if (unlikely(!(s))) printk(KERN_DEBUG "assertion failed: " #s " at %s:%d\n", \
+				   __FILE__, __LINE__);			\
+} while(0)
 
 
 /**

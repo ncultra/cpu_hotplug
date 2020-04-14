@@ -7,11 +7,9 @@ INC_PATH := -I. -I${INC_DIR}
 MY_CFLAGS = -c  -Wall -Werror -std=gnu11 -fms-extensions -nostdlib
 DEBUG_CFLAGS = -g -DDEBUG -fno-inline
 PRODUCTION_CFLAGS = -f-inline -02
+OBJECT_FILES_NON_STANDARD := ymake
 ccflags-y := ${MY_CFLAGS} ${INC_PATH}
-
-OBJECT_FILES_NON_STANDARD := y
-obj-m += cpu_hotplug.o connection.o
-#cpu_hotplug-y := cpu_hotplug.o
+obj-m += cpu_hotplug.o
 
 .PHONY: default
 default: debug-modules
@@ -25,7 +23,7 @@ super-clean: clean
 
 debug-modules: ccflags-y += ${DEBUG_CFLAGS}
 debug-modules: clean trim lint
-	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd)
+	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
 	$(shell find ./ -name "*.o" | xargs ~/bin/disasm.sh &>/dev/null)
 
 modules: ccflags-y += ${PRODUCTION_CFLAGS}
@@ -41,7 +39,6 @@ modules:
 
 modules_install:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules_install
-
 
 .PHONY: lint
 lint:
