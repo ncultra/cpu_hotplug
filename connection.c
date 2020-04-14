@@ -1,4 +1,4 @@
-#include connection.h
+#include "connection.h"
 
 atomic64_t SHOULD_SHUTDOWN = ATOMIC64_INIT(0);
 EXPORT_SYMBOL(SHOULD_SHUTDOWN);
@@ -8,11 +8,71 @@ LIST_HEAD(connections);
 struct connection listener = {{0,0},};
 EXPORT_SYMBOL(listener);
 
+uint32_t protocol_version = 0x010000;
+EXPORT_SYMBOL(protocol_version);
 
 char *socket_name = "/var/run/cpu_hotplug.sock";
 char *lockfile_name = "/var/run/cpu_hotplug.lock";
 module_param(socket_name, charp, 0644);
 
+static inline void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	if (req && rep) {
+		rep->magic = req->magic;
+		rep->version = req->version;
+		rep->msg_type = REPLY;
+		rep->cpu = req->cpu;
+		rep->action = req->action;
+		rep->result = 0;
+	}
+	return;
+}
+
+static int handle_invalid(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	init_reply(req, rep);
+	return EINVAL;
+}
+
+static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	init_reply(req, rep);
+	return 0;
+}
+
+int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	init_reply(req, rep);
+	return 0;
+}
+
+int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	init_reply(req, rep);
+	return 0;
+}
+
+int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	init_reply(req, rep);
+	return 0;
+}
+
+int handle_set_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	init_reply(req, rep);
+	return 0;
+}
+
+dispatch_t dispatch_table[] = {
+	handle_invalid,
+	handle_discover,
+	handle_unplug,
+	handle_plug,
+	handle_get_cur_state,
+	handle_set_cur_state,
+	handle_invalid
+};
 
 /**
  * check magic
@@ -21,12 +81,23 @@ module_param(socket_name, charp, 0644);
  * perform action
  * return zero or error code
  **/
-int parse_hotplug_msg(struct hotplug_msg *request, struct hotplug_msg *response)
+int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 {
+	if (!request || !response) {
+		return -EINVAL;
+	}
 
+	if (!check_magic(request) || !check_version(request)) {
+		return -EINVAL;
+	}
+
+	if (request->msg_type == REQUEST &&
+	    request->action > ZERO &&
+	    request->action < LAST) {
+		return dispatch_table[request->action](request, response);
+	}
+	return -EINVAL;
 }
-
-
 
 /**
  * free_message - and don't free the socket (kernel space)
@@ -36,7 +107,7 @@ int parse_hotplug_msg(struct hotplug_msg *request, struct hotplug_msg *response)
 void free_message(struct hotplug_msg *m)
 {
 	if (m) {
-		kfree(m);
+		kzfree(m);
 	}
 
 	return;
@@ -65,9 +136,9 @@ struct hotplug_msg *new_message(uint8_t *buf, size_t len)
  * http://haifux.org/hebrew/lectures/217/netLec5.pdf
  **/
 size_t k_socket_read(struct socket *sock,
-		      size_t size,
-		      void *in,
-		      unsigned int flags)
+		     size_t size,
+		     void *in,
+		     unsigned int flags)
 {
 
 	size_t res = 0;
@@ -90,6 +161,10 @@ void *read_alloc_buf(struct socket *sock,
 		     size_t max_size,
 		     size_t *actual_size)
 {
+
+	void *buf = NULL;
+	size_t bytes_read = 0;
+
 	if (!sock || !actual_size || max_size <= 0) {
 		return NULL;
 	}
@@ -101,13 +176,13 @@ void *read_alloc_buf(struct socket *sock,
 
 	*actual_size = 0;
 
-	void *buf = kzalloc(max_size, GFP_KERNEL);
+	buf = kzalloc(max_size, GFP_KERNEL);
 	if (buf == NULL) {
 		printk(KERN_DEBUG "kzalloc returned NULL\n");
 		return buf;
 	}
 
-	size_t bytes_read = k_socket_read(sock, max_size, buf, 0);
+	bytes_read = k_socket_read(sock, max_size, buf, 0);
 	if (bytes_read <= 0) {
 		if (bytes_read < 0) {
 			printk(KERN_DEBUG "recvmsg returned error %ld\n", bytes_read);
@@ -124,8 +199,8 @@ void *read_alloc_buf(struct socket *sock,
 		return NULL;
 	}
 	*actual_size = bytes_read;
-	if (max_size != actual_size) {
-		krealloc(buf, bytes_read, GFP_KERNEL);
+	if (max_size != *actual_size) {
+		buf = krealloc(buf, bytes_read, GFP_KERNEL);
 	}
 
 	return buf;
@@ -153,6 +228,18 @@ again:
 	}
 	return res;
 }
+
+bool init_and_queue_work(struct kthread_work *work,
+			 struct kthread_worker *worker,
+			 void (*function)(struct kthread_work *))
+{
+
+
+	kthread_init_work(work, function);
+	return kthread_queue_work(worker, work);
+
+}
+
 
 static void k_accept(struct kthread_work *work)
 {
@@ -202,8 +289,6 @@ close_out_quit:
 
 	return;
 }
-STACK_FRAME_NON_STANDARD(k_accept);
-
 
 static int start_listener(struct connection *c)
 {
@@ -241,8 +326,6 @@ err_exit:
 	c->connected = NULL;
 	return -ENFILE;
 }
-STACK_FRAME_NON_STANDARD(start_listener);
-
 
 static void link_new_connection_work(struct connection *c,
 				     struct list_head *l,
@@ -294,15 +377,16 @@ static void k_msg_server(struct kthread_work *work)
 	size_t read_size = 0;
 	uint8_t * read_buf = NULL;
 	struct socket *sock = NULL;
-	struct hotplug_msg *m = NULL;
+	struct kthread_worker *worker = NULL;
+	struct connection *connection = NULL;
 
 	if (! work) {
 		printk(KERN_DEBUG "message server: invalid parameter\n");
 		return;
 	}
 
-	struct kthread_worker *worker = work->worker;
-	struct connection *connection = container_of(work, struct connection, work);
+	worker = work->worker;
+	connection = container_of(work, struct connection, work);
 	if (! connection->connected) {
 		printk(KERN_DEBUG "message server: invalid socket\n");
 		goto close_out;
@@ -334,7 +418,7 @@ static void k_msg_server(struct kthread_work *work)
 		struct hotplug_msg *msg = (struct hotplug_msg *)read_buf;
 		if (msg->magic == CONNECTION_MAGIC) {
 			struct hotplug_msg reply = {0};
-			if (!parse_hotplug_msg(msg, &reply)) {
+			if (!parse_hotplug_req(msg, &reply)) {
 				kzfree(read_buf);
 				read_buf = NULL;
 				switch (reply.msg_type) {
@@ -395,7 +479,7 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 	int ccode = 0;
 
 	assert(c != NULL);
-	assert(sock_name != NULL);
+	assert(socket_name != NULL);
 	assert(__FLAG_IS_SET(flags, SOCK_LISTEN) || __FLAG_IS_SET(flags, SOCK_CONNECTED));
 	assert(! (__FLAG_IS_SET(flags, SOCK_LISTEN) && __FLAG_IS_SET(flags, SOCK_CONNECTED)));
 
@@ -429,7 +513,7 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 		 **/
 
 		spin_lock(&connections_lock);
-		list_add_rcu(&(c->l));
+		list_add_rcu(&(c->l), &connections);
 		spin_unlock(&connections_lock);
 		link_new_connection_work(c,
 					 &connections,
@@ -452,7 +536,6 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 					 "kcontrol read & write");
 	}
 
-
 	return c;
 
 err_exit:
@@ -462,7 +545,6 @@ err_exit:
 	}
 	return ERR_PTR(ccode);
 }
-STACK_FRAME_NON_STANDARD(init_connection);
 
 static void awaken_accept_thread(void)
 {
@@ -471,7 +553,7 @@ static void awaken_accept_thread(void)
 	size_t path_len, addr_len;
 	int ccode = 0;
 
-	SOCK_CREATE_KERN(&init_net, AF_UNIX, SOCK_STREAM, 0, &sock);
+	sock_create_kern(&init_net, AF_UNIX, SOCK_STREAM, 0, &sock);
 	if (!sock)
 		return;
 
@@ -513,10 +595,10 @@ static int unlink_sock_name(char *sock_name, char *lock_name)
         * its not an error if we can't get the path, it probably means
         * the socket name does not need to be unlinked, perhaps it has not
         * been created yet.
-		*
-		* but, continue onward and try to get the lock file, so another instance
-		* (in the future) will not unlink the sock name while we are using it.
-        **/
+	*
+	* but, continue onward and try to get the lock file, so another instance
+	* (in the future) will not unlink the sock name while we are using it.
+	**/
 		;
 	}
 
@@ -548,69 +630,27 @@ exit:
 }
 
 
-static int unlink_sock_name(char *sock_name, char *lock_name)
+int __init socket_interface_init(void)
 {
-	struct path name_path = {.mnt = 0};
-	struct file *lock_file = NULL;
-	struct file_lock l = {
-		.fl_flags = FL_FLOCK,
-		.fl_type = F_WRLCK,
-	};
-	int need_lock = 0;
-	int ccode = kern_path(sock_name, LOOKUP_FOLLOW, &name_path);
-	if (ccode) {
-       /**
-        * its not an error if we can't get the path, it probably means
-        * the socket name does not need to be unlinked, perhaps it has not
-        * been created yet.
-		*
-		* but, continue onward and try to get the lock file, so another instance
-		* (in the future) will not unlink the sock name while we are using it.
-    **/
-		;
-	}
-
-	if (lock_name) {
-		/**
-		 * open the lock file, create it if necessary
-		 **/
-		lock_file = filp_open(lock_name, O_RDONLY | O_CREAT, S_IRUSR | S_IWUSR);
-		if (IS_ERR(lock_file) || ! lock_file) {
-			printk(KERN_DEBUG "error opening or creating the socket lock\n");
-			ccode = -ENFILE;
-			goto exit;
-		}
-
-		/**
-		 * POSIX protocol says this lock will be released if the module
-		 * crashes or exits
-		 **/
-		need_lock = vfs_lock_file(lock_file, F_SETLK, &l, NULL);
-	}
-
-	if (!need_lock && !ccode) {
-		ccode = vfs_unlink(name_path.dentry->d_parent->d_inode,
-						   name_path.dentry,
-						   NULL);
-	}
-exit:
-	return ccode;
-}
-
-
-int
-socket_interface_init(void)
-{
+	cpu_hotplug_init();
 	unlink_sock_name(socket_name, lockfile_name);
-	init_connection(&listener, SENSOR_LISTEN, socket_name);
+	init_connection(&listener, SOCK_LISTEN, socket_name);
 	return 0;
 }
 
-void
-socket_interface_exit(void)
+void __exit socket_interface_exit(void)
 {
 	atomic64_set(&SHOULD_SHUTDOWN, 1);
 	awaken_accept_thread();
 	unlink_sock_name(socket_name, NULL);
+	cpu_hotplug_cleanup();
 	return;
 }
+
+module_init(socket_interface_init);
+module_exit(socket_interface_exit);
+
+
+MODULE_LICENSE(_MODULE_LICENSE);
+MODULE_AUTHOR(_MODULE_AUTHOR);
+MODULE_DESCRIPTION(_MODULE_INFO);

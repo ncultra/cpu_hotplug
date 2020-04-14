@@ -10,7 +10,7 @@ PRODUCTION_CFLAGS = -f-inline -02
 ccflags-y := ${MY_CFLAGS} ${INC_PATH}
 
 OBJECT_FILES_NON_STANDARD := y
-obj-m += cpu_hotplug.o
+obj-m += cpu_hotplug.o connection.o
 #cpu_hotplug-y := cpu_hotplug.o
 
 .PHONY: default

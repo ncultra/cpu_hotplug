@@ -1,8 +1,5 @@
 #include "cpu_hotplug.h"
 
-int
-
-
 static int my_cpu_online(unsigned int cpu)
 {
 	int ccode = 0;
@@ -18,7 +15,7 @@ static int my_cpu_going_offline(unsigned int cpu)
 	return ccode;
 }
 
-static int __init cpu_hotplug_init(void)
+int cpu_hotplug_init(void)
 {
 	int ccode = 0;
 	printk(KERN_DEBUG "cpu hotplug demo module\n");
@@ -30,19 +27,14 @@ static int __init cpu_hotplug_init(void)
 	printk(KERN_DEBUG "cpuhp_setup_state returned %d\n", ccode);
 	return 0;
 }
+EXPORT_SYMBOL(cpu_hotplug_init);
 
-static void __exit cpu_hotplug_cleanup(void)
+
+void cpu_hotplug_cleanup(void)
 {
 	printk(KERN_DEBUG "cpu hotplug demo unloading...\n");
 	cpuhp_remove_state(CPUHP_AP_ONLINE_DYN);
 }
+EXPORT_SYMBOL(cpu_hotplug_cleanup);
 
-
-
-module_init(cpu_hotplug_init);
-module_exit(cpu_hotplug_cleanup);
-
-
-MODULE_LICENSE(_MODULE_LICENSE);
-MODULE_AUTHOR(_MODULE_AUTHOR);
-MODULE_DESCRIPTION(_MODULE_INFO);
+MODULE_LICENSE("GPL v2");

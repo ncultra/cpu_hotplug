@@ -7,13 +7,8 @@
 #include <linux/cpuhotplug.h>
 #include <linux/sched.h>
 
-
-#define _MODULE_LICENSE "GPL v2"
-#define _MODULE_AUTHOR "Mike Day"
-#define _MODULE_INFO "cpu hot-plug demo"
-
-#define MAX_MESSAGE 256
-
+int __init cpu_hotplug_init(void);
+void __exit cpu_hotplug_cleanup(void);
 
 /**
 ****
