@@ -1,4 +1,3 @@
-#include "connection.h"
 #include "cpu_hotplug.h"
 atomic64_t SHOULD_SHUTDOWN = ATOMIC64_INIT(0);
 EXPORT_SYMBOL(SHOULD_SHUTDOWN);
@@ -644,7 +643,7 @@ exit:
 	return ccode;
 }
 
-int cpu_hotplug_init(void)
+static int cpu_hotplug_init(void)
 {
 	int ccode = 0;
 	printk(KERN_DEBUG "cpu hotplug demo module\n");
@@ -658,7 +657,7 @@ int cpu_hotplug_init(void)
 }
 
 
-void cpu_hotplug_cleanup(void)
+static void cpu_hotplug_cleanup(void)
 {
 	printk(KERN_DEBUG "cpu hotplug demo unloading...\n");
 	cpuhp_remove_state(CPUHP_AP_ONLINE_DYN);
