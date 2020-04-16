@@ -18,7 +18,7 @@
 #include <linux/err.h>
 #include <linux/fs.h>
 #include <linux/namei.h>
-#include <linux/list.h>
+#include <linux/rculist.h>
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/semaphore.h>
@@ -143,15 +143,6 @@ size_t k_socket_write(struct socket *sock,
 /* connection struct is used for both listening and connected sockets */
 /* function pointers for listen, accept, close */
 struct connection {
-	/**
-	 * _init parameters:
-	 * uint64_t flags - will have the PROBE_LISTENER or PROBE_CONNECTED bit set
-	 * void * data depends on the value of flags:
-	 *    if __FLAG_IS_SET(flags, PROBE_LISTENER), then data points to a
-	 *    string in the form of "/var/run/socket-name".
-	 *    if __FLAG_IS_SET(flags, PROBE_CONNECTED, then data points to a
-	 *    struct socket
-	 **/
 	struct list_head l;
 	uint64_t magic;
 	uint64_t flags;

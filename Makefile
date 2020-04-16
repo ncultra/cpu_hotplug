@@ -23,7 +23,7 @@ super-clean: clean
 
 debug-modules: ccflags-y += ${DEBUG_CFLAGS}
 debug-modules: clean trim lint
-	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
+	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd)
 	$(shell find ./ -name "*.o" | xargs ~/bin/disasm.sh &>/dev/null)
 
 modules: ccflags-y += ${PRODUCTION_CFLAGS}
@@ -37,7 +37,7 @@ modules:
 # e.g., sudo cp -v ~/src/linux/certs/* /usr/src/kernels/$(uname -r)/certs/
 # also see https://www.kernel.org/doc/html/v4.15/admin-guide/module-signing.html
 
-modules_install:
+modules_install: sign
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules_install
 
 .PHONY: lint
@@ -54,3 +54,9 @@ trim:
 .PHONY: disassemble
 disassemble:
 	find ./ -name "*.o" | xargs ~/bin/disasm.sh
+
+.PHONY: sign
+sign:
+	/usr/src/kernels/$(shell uname -r)/scripts/sign-file sha512 \
+	/usr/src/kernels/$(shell uname -r)/certs/signing_key.pem \
+	/usr/src/kernels/$(shell uname -r)/certs/signing_key.x509 cpu_hotplug.ko

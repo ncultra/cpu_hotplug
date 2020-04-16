@@ -3,7 +3,8 @@ atomic64_t SHOULD_SHUTDOWN = ATOMIC64_INIT(0);
 EXPORT_SYMBOL(SHOULD_SHUTDOWN);
 
 DEFINE_SPINLOCK(connections_lock);
-LIST_HEAD(connections);
+
+struct list_head connections;
 struct connection listener = {{0,0},};
 EXPORT_SYMBOL(listener);
 
@@ -349,7 +350,7 @@ static void link_new_connection_work(struct connection *c,
 
 	if (! atomic64_read(&SHOULD_SHUTDOWN)) {
 		spin_lock(&connections_lock);
-		list_add_rcu(&c->l, l);
+		list_add_rcu(&(c->l), l);
 		spin_unlock(&connections_lock);
 		kthread_init_work(&c->work, f);
 		__SET_FLAG(c->flags, SOCK_HAS_WORK);
@@ -522,13 +523,8 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 		/**
 		 * the socket is now bound and listening, we don't want to block
 		 * here so schedule the accept to happen on a separate kernel thread.
-		 * first, link it to the kernel sensor list of connections, then schedule
-		 * it as work
 		 **/
 
-		spin_lock(&connections_lock);
-		list_add_rcu(&(c->l), &connections);
-		spin_unlock(&connections_lock);
 		link_new_connection_work(c,
 					 &connections,
 					 k_accept,
@@ -647,10 +643,10 @@ static int cpu_hotplug_init(void)
 {
 	int ccode = 0;
 	printk(KERN_DEBUG "cpu hotplug demo module\n");
-	ccode = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN,
-                            "x86/demo:online",
-                            my_cpu_online,
-                            my_cpu_going_offline);
+	ccode = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+				  "x86/demo:online",
+				  my_cpu_online,
+				  my_cpu_going_offline);
 
 	printk(KERN_DEBUG "cpuhp_setup_state returned %d\n", ccode);
 	return 0;
@@ -660,12 +656,14 @@ static int cpu_hotplug_init(void)
 static void cpu_hotplug_cleanup(void)
 {
 	printk(KERN_DEBUG "cpu hotplug demo unloading...\n");
-	cpuhp_remove_state(CPUHP_AP_ONLINE_DYN);
+	cpuhp_remove_state_nocalls(CPUHP_AP_ONLINE_DYN);
 }
 
 
 int __init socket_interface_init(void)
 {
+	INIT_LIST_HEAD_RCU(&connections);
+	atomic64_set(&SHOULD_SHUTDOWN, 0);
 	cpu_hotplug_init();
 	unlink_sock_name(socket_name, lockfile_name);
 	init_connection(&listener, SOCK_LISTEN, socket_name);
