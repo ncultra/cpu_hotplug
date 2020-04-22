@@ -61,7 +61,7 @@ extern uint32_t protocol_version;
 
 /**
  * message protocol version
- *
+ * note: NETWORK BYTE ORDER
  *    0                   1                   2                   3
  *    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
  *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -73,21 +73,21 @@ extern uint32_t protocol_version;
 #define GET_MINOR_VERSION(v) (((v) & 0x00ff00) >> 8)
 #define GET_RELEASE_VERSION(v) ((v) & 0xff)
 
-enum message_type {EMPTY, REQUEST, REPLY, COMPLETE};
-enum message_action {ZERO, DISCOVER, UNPLUG, PLUG, GET_CURRENT_STATE, SET_TARGET_STATE, LAST};
+enum message_type {EMPTY = 0, REQUEST, REPLY, COMPLETE};
+enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_CURRENT_STATE, SET_TARGET_STATE, LAST};
 /** see linux/include/cpumask.h and kernel/cpu.c exported bitmasks **/
 
 
 struct hotplug_msg
 {
-	uint32_t magic;
-	uint32_t version;
-	uint32_t msg_type;
-	uint32_t cpu;    /* logical cpu */
-	uint32_t action; /* 0 == unplug, 1 = plug  */
-	uint32_t current_state;
-	uint32_t target_state;
-	uint32_t result; /* 0 == success, non-zero == error */
+	uint32_t magic; //0
+	uint32_t version; //4
+	uint32_t msg_type; //8
+	uint32_t cpu;    /* 12 logical cpu */
+	uint32_t action; /* 16 0 == unplug, 1 = plug  */
+	uint32_t current_state; //20
+	uint32_t target_state; //24
+	uint32_t result; /* 280 == success, non-zero == error */
 } __attribute__((packed));
 
 #define CONNECTION_MAGIC ((uint32_t)0xf8cb820d)
