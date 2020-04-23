@@ -212,9 +212,9 @@ class HotPlug:
         print(path)
         msg_dict['msg_type'] = self.msg_types['REPLY']
         try:
-            with io.open(path, r, encoding = 'utf-8') as fp:
+            with io.open(path, 'w', encoding = 'utf-8') as fp:
                 print("open OK")
-                fp.read()
+                fp.write('0')
                 msg_dict['result'] = self.errors['OK']
         except IOError:
             print(IOError)
