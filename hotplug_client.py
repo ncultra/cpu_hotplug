@@ -35,7 +35,10 @@ class HotPlug:
                        'NOT_HANDLED': 5}
 
     def server(self):
-        os.remove(self.sock_name)
+        try:
+            os.remove(self.sock_name)
+        except:
+            pass
         try:
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.sock.bind(self.sock_name)
@@ -47,6 +50,8 @@ class HotPlug:
             try:
                 new_sock, addr = self.sock.accept()
                 buf = self.read_raw_message(new_sock)
+                if len(buf) == 0:
+                    continue
             except socket.error:
                 print("Error reading raw message from socket")
                 new_sock.close()
@@ -72,6 +77,9 @@ class HotPlug:
         if True == self.args.discover:
             print("Sending a Discovery Request")
             msg_dict['action'] = self.msg_actions['DISCOVER']
+        elif self.args.unplug is not None:
+            self.send_unplug_request(msg_dict, self.args.unplug)
+            return
         else:
             raise ParserError("Unsupported message action", self.errors['NOT_HANDLED'])
         msg = self.pack_message(msg_dict)
@@ -89,6 +97,7 @@ class HotPlug:
             self.sock.connect(sock_name)
         except socket.error:
             print("Error connecting to socket {}".format(sock_name))
+            raise
         return self.sock
 
     def pack_message(self, msg_dict):
@@ -176,14 +185,44 @@ class HotPlug:
             return
 
         if request['action'] == self.msg_actions['UNPLUG']:
-            request['msg_type'] = self.msg_types['REPLY']
-            request['result'] = self.errors['OK']
-            reply = self.pack_message(request)
-            print("Received a request to unplug cpu {}", request['cpu'])
-            self.write_packed_message(_sock, reply)
+            self.handle_unplug_request(request, _sock)
             return
 
         raise ParserError("Request message not handled", self.errors['NOT_HANDLED'])
+
+    def client_send_rcv(self, msg_dict):
+        msg = self.pack_message(msg_dict)
+        self.write_packed_message(self.sock, msg)
+        buf = self.read_raw_message(self.sock)
+        response = self.unpack_raw_message(buf)
+        self.print_unpacked_message(response)
+
+    def send_unplug_request(self, msg_dict, cpu_list):
+        """msg_dict is a template for the request message,
+           cpu_list is a list of the cpus to be unplugged"""
+        for cpu in cpu_list:
+            msg_dict['cpu'] = cpu
+            msg_dict['action'] = self.msg_actions['UNPLUG']
+            self.client_send_rcv(msg_dict)
+        self.sock.close()
+
+    def handle_unplug_request(self, msg_dict, _sock):
+        print("Received a request to unplug cpu {}".format(msg_dict['cpu']))
+        path = '/sys/devices/system/cpu/cpu{}/online'.format(msg_dict['cpu'])
+        print(path)
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        try:
+            with io.open(path, r, encoding = 'utf-8') as fp:
+                print("open OK")
+                fp.read()
+                msg_dict['result'] = self.errors['OK']
+        except IOError:
+            print(IOError)
+            print("Error writing to {}".format(path))
+            msg_dict['result'] = self.errors['NOT_HANDLED']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
 
 def hotplug_main(args):
     usage_string = """usage: {} [...]""".format(sys.argv[0])
@@ -191,8 +230,16 @@ def hotplug_main(args):
     parser.add_argument('--listen', action = 'store_true', help = 'listen for connections')
     parser.add_argument('--socket', action = 'store_true', help = 'path to domain socket')
     parser.add_argument('--discover', action = 'store_true', help = 'send a discovery request')
+    parser.add_argument('--unplug', action = 'store', nargs = '*', type = int, help = 'unplug one or more cpus')
+    parser.add_argument('--plug', action = 'store', nargs = '*', type = int, help = 'plug in one or more cpus')
 
     args = parser.parse_args()
+    print(args)
+    if args.unplug is not None:
+        print(len(args.unplug))
+        for cpu in args.unplug:
+            print('cpu{}'.format(cpu))
+#    return
 
     hotplug = HotPlug(args)
     if args.listen:
