@@ -80,6 +80,9 @@ class HotPlug:
         elif self.args.unplug is not None:
             self.send_unplug_request(msg_dict, self.args.unplug)
             return
+        elif self.args.plug is not None:
+            self.send_plug_request(msg_dict, self.args.plug)
+            return
         else:
             raise ParserError("Unsupported message action", self.errors['NOT_HANDLED'])
         msg = self.pack_message(msg_dict)
@@ -188,6 +191,10 @@ class HotPlug:
             self.handle_unplug_request(request, _sock)
             return
 
+        if request['action'] == self.msg_actions['PLUG']:
+            self.handle_plug_request(request, _sock)
+            return
+
         raise ParserError("Request message not handled", self.errors['NOT_HANDLED'])
 
     def client_send_rcv(self, msg_dict):
@@ -206,6 +213,15 @@ class HotPlug:
             self.client_send_rcv(msg_dict)
         self.sock.close()
 
+    def send_plug_request(self, msg_dict, cpu_list):
+        """msg_dict is a template for the request message,
+           cpu_list is a list of the cpus to be unplugged"""
+        for cpu in cpu_list:
+            msg_dict['cpu'] = cpu
+            msg_dict['action'] = self.msg_actions['PLUG']
+            self.client_send_rcv(msg_dict)
+        self.sock.close()
+
     def handle_unplug_request(self, msg_dict, _sock):
         print("Received a request to unplug cpu {}".format(msg_dict['cpu']))
         path = '/sys/devices/system/cpu/cpu{}/online'.format(msg_dict['cpu'])
@@ -217,8 +233,42 @@ class HotPlug:
                 fp.write('0')
                 msg_dict['result'] = self.errors['OK']
         except IOError:
-            print(IOError)
             print("Error writing to {}".format(path))
+            msg_dict['result'] = self.errors['NOT_HANDLED']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
+
+    def handle_plug_request(self, msg_dict, _sock):
+        print("Received a request to plug in cpu {}".format(msg_dict['cpu']))
+        path = '/sys/devices/system/cpu/cpu{}/online'.format(msg_dict['cpu'])
+        print(path)
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        try:
+            with io.open(path, 'w', encoding = 'utf-8') as fp:
+                print("open OK")
+                fp.write('1')
+                msg_dict['result'] = self.errors['OK']
+        except IOError:
+            print("Error writing to {}".format(path))
+            msg_dict['result'] = self.errors['NOT_HANDLED']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
+
+    def handle_get_current_state(self, msg_dict, _sock):
+        print("Received a request to get the current state of cpu {}".format(msg_dict['cpu']))
+        path = '/sys/devices/system/cpu/cpu{}/hotplug/state'.format(msg_dict['cpu'])
+        print(path)
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        try:
+            with io.open(path, 'r', encoding = 'utf-8') as fp:
+                print("open OK")
+                current_state = fp.read()
+                msg_dict['current_state'] = current_state
+                msg_dict['result'] = self.errors['OK']
+        except IOError:
+            print("Error reading from {}".format(path))
             msg_dict['result'] = self.errors['NOT_HANDLED']
         reply = self.pack_message(msg_dict)
         self.write_packed_message(_sock, reply)
@@ -232,6 +282,8 @@ def hotplug_main(args):
     parser.add_argument('--discover', action = 'store_true', help = 'send a discovery request')
     parser.add_argument('--unplug', action = 'store', nargs = '*', type = int, help = 'unplug one or more cpus')
     parser.add_argument('--plug', action = 'store', nargs = '*', type = int, help = 'plug in one or more cpus')
+    parser.add_argument('--cur_state', action = 'store', nargs = '*', type = int,
+                        help = 'get current state for one or more cpus')
 
     args = parser.parse_args()
     print(args)
