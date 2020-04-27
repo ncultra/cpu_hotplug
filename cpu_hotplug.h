@@ -87,7 +87,7 @@ struct hotplug_msg
 	uint32_t action; /* 16 0 == unplug, 1 = plug  */
 	uint32_t current_state; //20
 	uint32_t target_state; //24
-	uint32_t result; /* 280 == success, non-zero == error */
+	uint32_t result; /* 28 0 == success, non-zero == error */
 } __attribute__((packed));
 
 #define CONNECTION_MAGIC ((uint32_t)0xf8cb820d)

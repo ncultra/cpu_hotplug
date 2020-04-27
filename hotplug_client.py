@@ -29,8 +29,8 @@ class HotPlug:
         self.PROTOCOL_VERSION = 0x00000100
         self.prot_ver = pack('!L', self.PROTOCOL_VERSION)
         self.msg_types = {'EMPTY': 0, 'REQUEST': 1, 'REPLY': 2, 'COMPLETE': 3}
-        self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3,
-                            'GET_CURRENT_STATE': 4, 'SET_TARGET_STATE': 5, 'LAST': 6}
+        self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3, 'GET_CURRENT_STATE': 4,
+                            'SET_TARGET_STATE': 5, 'LAST': 6}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5}
 
@@ -49,19 +49,21 @@ class HotPlug:
         while True:
             try:
                 new_sock, addr = self.sock.accept()
-                buf = self.read_raw_message(new_sock)
-                if len(buf) == 0:
-                    continue
+                self.server_rcv_send(new_sock)
             except socket.error:
                 print("Error reading raw message from socket")
                 new_sock.close()
                 self.sock.close()
 
+    def server_rcv_send(self, _sock):
+        while True:
+            buf = self.read_raw_message(_sock)
+            if len(buf) == 0:
+                _sock.close()
+                return
             msg = self.unpack_raw_message(buf)
             self.print_unpacked_message(msg)
-            self.dispatch_request(msg, new_sock)
-
-            new_sock.close()
+            self.dispatch_request(msg, _sock)
 
     def client(self):
         self.sock_connect(self.sock_name)
@@ -77,18 +79,29 @@ class HotPlug:
         if True == self.args.discover:
             print("Sending a Discovery Request")
             msg_dict['action'] = self.msg_actions['DISCOVER']
-        elif self.args.unplug is not None:
-            self.send_unplug_request(msg_dict, self.args.unplug)
+        elif (self.args.unplug is True) and (self.args.cpu_list is not None):
+            self.send_unplug_request(msg_dict, self.args.cpu_list)
             return
-        elif self.args.plug is not None:
-            self.send_plug_request(msg_dict, self.args.plug)
+        elif (self.args.plug is True) and (self.args.cpu_list is not None):
+            self.send_plug_request(msg_dict, self.args.cpu_list)
             return
+        elif (self.args.get_state is True) and (self.args.cpu_list is not None):
+            self.send_get_current_state_request(msg_dict, self.args.cpu_list)
+            return
+        elif (self.args.set_target is True) and \
+             (self.args.cpu_list is not None) and \
+             (self.args.target is not None):
+            self.send_set_target_state_request(msg_dict,
+                                               self.args.cpu_list,
+                                               self.args.target)
+            return
+
         else:
             raise ParserError("Unsupported message action", self.errors['NOT_HANDLED'])
         msg = self.pack_message(msg_dict)
         self.write_packed_message(self.sock, msg)
         buf = self.read_raw_message(self.sock)
-        self.sock.close()
+#        self.sock.close()
         response = self.unpack_raw_message(buf)
         self.print_unpacked_message(response)
 
@@ -105,7 +118,6 @@ class HotPlug:
 
     def pack_message(self, msg_dict):
         """ msg_dict is a dictionary """
-        print(msg_dict)
         msg = bytearray(36)
         pack_into('=L', msg, 0, self.CONNECTION_MAGIC)
         pack_into('!L', msg, 4, self.PROTOCOL_VERSION)
@@ -195,6 +207,14 @@ class HotPlug:
             self.handle_plug_request(request, _sock)
             return
 
+        if request['action'] == self.msg_actions['GET_CURRENT_STATE']:
+            self.handle_get_current_state(request, _sock)
+            return
+
+        if request['action'] == self.msg_actions['SET_TARGET_STATE']:
+            self.handle_set_target_state(request, _sock)
+            return
+
         raise ParserError("Request message not handled", self.errors['NOT_HANDLED'])
 
     def client_send_rcv(self, msg_dict):
@@ -213,15 +233,6 @@ class HotPlug:
             self.client_send_rcv(msg_dict)
         self.sock.close()
 
-    def send_plug_request(self, msg_dict, cpu_list):
-        """msg_dict is a template for the request message,
-           cpu_list is a list of the cpus to be unplugged"""
-        for cpu in cpu_list:
-            msg_dict['cpu'] = cpu
-            msg_dict['action'] = self.msg_actions['PLUG']
-            self.client_send_rcv(msg_dict)
-        self.sock.close()
-
     def handle_unplug_request(self, msg_dict, _sock):
         print("Received a request to unplug cpu {}".format(msg_dict['cpu']))
         path = '/sys/devices/system/cpu/cpu{}/online'.format(msg_dict['cpu'])
@@ -231,13 +242,23 @@ class HotPlug:
             with io.open(path, 'w', encoding = 'utf-8') as fp:
                 print("open OK")
                 fp.write('0')
-                msg_dict['result'] = self.errors['OK']
+            msg_dict['current_state'] = self.get_current_state(msg_dict['cpu'])
+            msg_dict['result'] = self.errors['OK']
         except IOError:
             print("Error writing to {}".format(path))
             msg_dict['result'] = self.errors['NOT_HANDLED']
         reply = self.pack_message(msg_dict)
         self.write_packed_message(_sock, reply)
         return
+
+    def send_plug_request(self, msg_dict, cpu_list):
+        """msg_dict is a template for the request message,
+           cpu_list is a list of the cpus to be unplugged"""
+        for cpu in cpu_list:
+            msg_dict['cpu'] = cpu
+            msg_dict['action'] = self.msg_actions['PLUG']
+            self.client_send_rcv(msg_dict)
+        self.sock.close()
 
     def handle_plug_request(self, msg_dict, _sock):
         print("Received a request to plug in cpu {}".format(msg_dict['cpu']))
@@ -248,7 +269,8 @@ class HotPlug:
             with io.open(path, 'w', encoding = 'utf-8') as fp:
                 print("open OK")
                 fp.write('1')
-                msg_dict['result'] = self.errors['OK']
+            msg_dict['current_state'] = self.get_current_state(msg_dict['cpu'])
+            msg_dict['result'] = self.errors['OK']
         except IOError:
             print("Error writing to {}".format(path))
             msg_dict['result'] = self.errors['NOT_HANDLED']
@@ -256,23 +278,81 @@ class HotPlug:
         self.write_packed_message(_sock, reply)
         return
 
+    def send_get_current_state_request(self, msg_dict, cpu_list):
+        """msg_dict is a template for the request message,
+           cpu_list is a list of the cpus to be unplugged"""
+        msg_dict['action'] = self.msg_actions['GET_CURRENT_STATE']
+        for cpu in cpu_list:
+            print("sending for cpu {}".format(cpu))
+            msg_dict['cpu'] = cpu
+            self.client_send_rcv(msg_dict)
+        self.sock.close()
+
     def handle_get_current_state(self, msg_dict, _sock):
         print("Received a request to get the current state of cpu {}".format(msg_dict['cpu']))
-        path = '/sys/devices/system/cpu/cpu{}/hotplug/state'.format(msg_dict['cpu'])
-        print(path)
         msg_dict['msg_type'] = self.msg_types['REPLY']
         try:
-            with io.open(path, 'r', encoding = 'utf-8') as fp:
-                print("open OK")
-                current_state = fp.read()
-                msg_dict['current_state'] = current_state
-                msg_dict['result'] = self.errors['OK']
+            msg_dict['current_state'] = self.get_current_state(msg_dict['cpu'])
+            msg_dict['result'] = self.errors['OK']
         except IOError:
-            print("Error reading from {}".format(path))
             msg_dict['result'] = self.errors['NOT_HANDLED']
         reply = self.pack_message(msg_dict)
         self.write_packed_message(_sock, reply)
         return
+
+    def send_set_target_state_request(self, msg_dict, cpu_list, target):
+        """msg_dict is a template for the request message,
+           cpu_list is a list of the cpus to be unplugged"""
+        msg_dict['action'] = self.msg_actions['SET_TARGET_STATE']
+        msg_dict['target_state'] = target[0]
+        for cpu in cpu_list:
+            print("sending for cpu {}".format(cpu))
+            msg_dict['cpu'] = cpu
+            self.client_send_rcv(msg_dict)
+        self.sock.close()
+
+    def handle_set_target_state(self, msg_dict, _sock):
+        print("Received a request to set target state {} for cpu {}".format(msg_dict['target_state'],
+                                                                            msg_dict['cpu']))
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        try:
+            self.set_target_state(msg_dict['cpu'], msg_dict['target_state'])
+            msg_dict['current_state'] = self.get_current_state(msg_dict['cpu'])
+            msg_dict['result'] = self.errors['OK']
+        except IOError:
+            msg_dict['result'] = self.errors['NOT_HANDLED']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
+
+    def get_current_state(self, cpu):
+        path = '/sys/devices/system/cpu/cpu{}/hotplug/state'.format(cpu)
+        print(path)
+        current_state = None
+        try:
+            with io.open(path, 'r', encoding = 'utf-8') as fp:
+                current_state = int(fp.read())
+                fp.close()
+        except IOError:
+            print("Error reading from {}".format(path))
+            raise IOError
+        print("read current state {} for cpu {}".format(current_state, cpu))
+        return current_state
+
+    def set_target_state(self, cpu, target_state):
+        path = '/sys/devices/system/cpu/cpu{}/hotplug/target'.format(cpu)
+        print(path)
+        try:
+            with io.open(path, 'w', encoding = 'utf-8') as fp:
+                print("writing {} to cpu {}".format(target_state, cpu))
+                fp.write('{}'.format(target_state))
+                fp.close()
+        except IOError:
+            print("Error writing {} to {}".format(target_state, path))
+            print(IOError)
+            raise IOError
+        return target_state
+
 
 def hotplug_main(args):
     usage_string = """usage: {} [...]""".format(sys.argv[0])
@@ -280,18 +360,16 @@ def hotplug_main(args):
     parser.add_argument('--listen', action = 'store_true', help = 'listen for connections')
     parser.add_argument('--socket', action = 'store_true', help = 'path to domain socket')
     parser.add_argument('--discover', action = 'store_true', help = 'send a discovery request')
-    parser.add_argument('--unplug', action = 'store', nargs = '*', type = int, help = 'unplug one or more cpus')
-    parser.add_argument('--plug', action = 'store', nargs = '*', type = int, help = 'plug in one or more cpus')
-    parser.add_argument('--cur_state', action = 'store', nargs = '*', type = int,
-                        help = 'get current state for one or more cpus')
+    parser.add_argument('--unplug', action = 'store_true', help = 'unplug one or more cpus')
+    parser.add_argument('--plug', action = 'store_true', help = 'plug in one or more cpus')
+    parser.add_argument('--get_state', action = 'store_true', help = 'get the current state of one or more cpus')
+    parser.add_argument('--set_target', action = 'store_true',
+                        help = 'set the target state state for one or more cpus')
+    parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')
+    parser.add_argument('--target', action = 'store', nargs = 1, type = int, help = 'new target state for cpu')
 
     args = parser.parse_args()
     print(args)
-    if args.unplug is not None:
-        print(len(args.unplug))
-        for cpu in args.unplug:
-            print('cpu{}'.format(cpu))
-#    return
 
     hotplug = HotPlug(args)
     if args.listen:
