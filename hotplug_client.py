@@ -92,12 +92,11 @@ class HotPlug:
         elif (self.args.get_state is True) and (self.args.cpu_list is not None):
             self.send_get_current_state_request(msg_dict, self.args.cpu_list)
             return
-        elif (self.args.set_target is True) and \
-             (self.args.cpu_list is not None) and \
-             (self.args.target is not None):
+        elif (self.args.set_target is not None) and \
+             (self.args.cpu_list is not None):
             self.send_set_target_state_request(msg_dict,
                                                self.args.cpu_list,
-                                               self.args.target)
+                                               self.args.set_target)
             return
 
         else:
@@ -388,10 +387,9 @@ def hotplug_main(args):
     parser.add_argument('--unplug', action = 'store_true', help = 'unplug one or more cpus')
     parser.add_argument('--plug', action = 'store_true', help = 'plug in one or more cpus')
     parser.add_argument('--get_state', action = 'store_true', help = 'get the current state of one or more cpus')
-    parser.add_argument('--set_target', action = 'store_true',
+    parser.add_argument('--set_target', action = 'store', nargs = 1, type = int,
                         help = 'set the target state state for one or more cpus')
     parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')
-    parser.add_argument('--target', action = 'store', nargs = 1, type = int, help = 'new target state for cpu')
 
     args = parser.parse_args()
     print(args)
