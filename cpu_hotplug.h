@@ -92,10 +92,10 @@ struct hotplug_msg
    * see include/linux/cpumask.h for definitions.
    * assume 512 potential cpu IDs.
    **/
-  uint64_t _cpu_possible_mask[8]; /* 32 */
-  uint64_t _cpu_present_mask[8]; /* 96 */
-  uint64_t _cpu_online_mask[8]; /* 160 */
-  uint64_t _cpu_active_mask[8]; /* 224 */
+  uint64_t possible_mask[8]; /* 32 */
+  uint64_t present_mask[8]; /* 96 */
+  uint64_t online_mask[8]; /* 160 */
+  uint64_t active_mask[8]; /* 224 */
 } __attribute__((packed));
 
 #define CONNECTION_MAGIC ((uint32_t)0xf8cb820d)
@@ -118,9 +118,17 @@ static inline int check_magic(struct hotplug_msg *m)
 
 static inline int check_version(struct hotplug_msg *m)
 {
-	if (m) {
-		if (m->version == protocol_version) {
-			return 1;
+	if (!m) {
+		return 0;
+	}
+	if (GET_MAJOR_VERSION(m->version) ==
+	    GET_MAJOR_VERSION(protocol_version)) {
+		if (GET_MINOR_VERSION(m->version) ==
+		    GET_MINOR_VERSION(protocol_version)) {
+			if (GET_RELEASE_VERSION(m->version) ==
+			    GET_RELEASE_VERSION(protocol_version)) {
+				return 1;
+			}
 		}
 	}
 	return 0;
