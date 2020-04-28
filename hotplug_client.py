@@ -398,7 +398,12 @@ def hotplug_main(args):
     if args.listen:
         hotplug.server()
     else:
-        hotplug.client()
+        try:
+            hotplug.client()
+        except ParserError:
+            parser.print_help()
+
+
 
 if __name__ == "__main__":
     import argparse
