@@ -74,7 +74,11 @@ class HotPlug:
                     'action': 0,
                     'current_state': 0,
                     'target_state': 0,
-                    'result': 0}
+                    'result': 0,
+                    'possible_mask': [0, 0, 0, 0, 0, 0, 0, 0],
+                    'present_mask': [0, 0, 0, 0, 0, 0, 0, 0],
+                    'online_mask': [0, 0, 0, 0, 0, 0, 0, 0],
+                    'active_mask': [0, 0, 0, 0, 0, 0, 0, 0]}
 
         if True == self.args.discover:
             print("Sending a Discovery Request")
@@ -118,7 +122,7 @@ class HotPlug:
 
     def pack_message(self, msg_dict):
         """ msg_dict is a dictionary """
-        msg = bytearray(36)
+        msg = bytearray(288)
         pack_into('=L', msg, 0, self.CONNECTION_MAGIC)
         pack_into('!L', msg, 4, self.PROTOCOL_VERSION)
         pack_into('=L', msg, 8, msg_dict['msg_type'])
@@ -127,6 +131,19 @@ class HotPlug:
         pack_into('=L', msg, 20, msg_dict['current_state'])
         pack_into('=L', msg, 24, msg_dict['target_state'])
         pack_into('=L', msg, 28, msg_dict['result'])
+        offs = 32
+        for q in msg_dict['possible_mask']:
+            pack_into('=Q', msg, offs, q)
+            offs += 8
+        for q in msg_dict['present_mask']:
+            pack_into('=Q', msg, offs, q)
+            offs += 8
+        for q in msg_dict['online_mask']:
+            pack_into('=Q', msg, offs, q)
+            offs += 8
+        for q in msg_dict['active_mask']:
+            pack_into('=Q', msg, offs, q)
+            offs += 8
         return msg
 
     def print_packed_message(self, msg):
@@ -143,7 +160,7 @@ class HotPlug:
 
     def read_raw_message(self, _sock):
         try:
-            buf = _sock.recv(36)
+            buf = _sock.recv(288)
             print("Read {} bytes".format(len(buf)))
             return buf
         except socket.error:
@@ -160,6 +177,10 @@ class HotPlug:
         current_state = unpack_from('=L', msg, 20)
         target_state = unpack_from('=L', msg, 24)
         result = unpack_from('=L', msg, 28)
+        cpu_possible_mask = unpack_from('=QQQQQQQQ', msg, 32)
+        cpu_present_mask = unpack_from('=QQQQQQQQ', msg, 96)
+        cpu_online_mask = unpack_from('=QQQQQQQQ', msg, 160)
+        cpu_active_mask = unpack_from('=QQQQQQQQ', msg, 224)
         return {'magic': magic[0],
                 'version': version[0],
                 'msg_type': msg_type[0],
@@ -167,7 +188,11 @@ class HotPlug:
                 'action': action[0],
                 'current_state': current_state[0],
                 'target_state': target_state[0],
-                'result': result[0]}
+                'result': result[0],
+                'possible_mask': cpu_possible_mask,
+                'present_mask': cpu_present_mask,
+                'online_mask': cpu_online_mask,
+                'active_mask': cpu_active_mask}
 
     def check_magic(self, magic):
         if magic == self.CONNECTION_MAGIC:

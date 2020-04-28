@@ -80,14 +80,22 @@ enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_CURRENT_STATE, SET_TA
 
 struct hotplug_msg
 {
-	uint32_t magic; //0
-	uint32_t version; //4
-	uint32_t msg_type; //8
+	uint32_t magic; /* 0 */
+	uint32_t version; /* 4 */
+	uint32_t msg_type; /* 8 */
 	uint32_t cpu;    /* 12 logical cpu */
 	uint32_t action; /* 16 0 == unplug, 1 = plug  */
-	uint32_t current_state; //20
-	uint32_t target_state; //24
+	uint32_t current_state; /* 20 */
+	uint32_t target_state; /* 24 */
 	uint32_t result; /* 28 0 == success, non-zero == error */
+  /**
+   * see include/linux/cpumask.h for definitions.
+   * assume 512 potential cpu IDs.
+   **/
+  uint64_t cpu_possible_mask[8]; /* 32 */
+  uint64_t cpu_present_mask[8]; /* 96 */
+  uint64_t cpu_online_mask[8]; /* 160 */
+  uint64_t cpu_active_mask[8]; /* 224 */
 } __attribute__((packed));
 
 #define CONNECTION_MAGIC ((uint32_t)0xf8cb820d)
