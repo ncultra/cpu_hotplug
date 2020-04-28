@@ -18,7 +18,7 @@ class HotPlug:
         if self.args.socket:
             self.sock_name = args.socket
         else:
-            self.sock_name = "/var/run/cpu_hotplug"
+            self.sock_name = "/var/run/cpu_hotplug.sock"
 
         if self.args.listen:
             self.is_client = 0
