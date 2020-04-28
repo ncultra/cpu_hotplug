@@ -43,17 +43,28 @@ class HotPlug:
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.sock.bind(self.sock_name)
             self.sock.listen()
-        except socket.error:
+        except OSError:
             print("Error binding or listening to socket {}".format(self.sock_name))
+            try:
+                self.sock.close()
+                os.remove(self.sock_name)
+            except OSError:
+                pass
+            sys.exit(1)
 
         while True:
             try:
                 new_sock, addr = self.sock.accept()
                 self.server_rcv_send(new_sock)
-            except socket.error:
+            except OSError:
                 print("Error reading raw message from socket")
-                new_sock.close()
-                self.sock.close()
+                try:
+                    new_sock.close()
+                    self.sock.close()
+                    os.remove(self.sock_name)
+                except OSError:
+                    pass
+                sys.exit(1)
 
     def server_rcv_send(self, _sock):
         while True:
@@ -66,7 +77,11 @@ class HotPlug:
             self.dispatch_request(msg, _sock)
 
     def client(self):
-        self.sock_connect(self.sock_name)
+        try:
+            self.sock_connect(self.sock_name)
+        except OSError:
+            print("Error connecting to {}".format(self.sock_name))
+            sys.exit(1)
         msg_dict = {'magic': self.CONNECTION_MAGIC,
                     'version': self.PROTOCOL_VERSION,
                     'msg_type': 1,
@@ -104,17 +119,16 @@ class HotPlug:
         msg = self.pack_message(msg_dict)
         self.write_packed_message(self.sock, msg)
         buf = self.read_raw_message(self.sock)
-#        self.sock.close()
+        self.sock.close()
         response = self.unpack_raw_message(buf)
         self.print_unpacked_message(response)
 
-
     def sock_connect(self, sock_name):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         print("Connecting to {}".format(sock_name))
         try:
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.sock.connect(sock_name)
-        except socket.error:
+        except OSError:
             print("Error connecting to socket {}".format(sock_name))
             raise
         return self.sock
@@ -154,7 +168,7 @@ class HotPlug:
         try:
             print("sending {} bytes".format(len(msg)))
             _sock.sendall(msg)
-        except socket.error:
+        except OSError:
             print("Error writing packed message field to socket")
 
     def read_raw_message(self, _sock):
@@ -162,7 +176,7 @@ class HotPlug:
             buf = _sock.recv(288)
             print("Read {} bytes".format(len(buf)))
             return buf
-        except socket.error:
+        except OSError:
             print("Error reading bytes from socket")
 
 
@@ -256,6 +270,7 @@ class HotPlug:
             msg_dict['action'] = self.msg_actions['UNPLUG']
             self.client_send_rcv(msg_dict)
         self.sock.close()
+        return
 
     def handle_unplug_request(self, msg_dict, _sock):
         print("Received a request to unplug cpu {}".format(msg_dict['cpu']))
@@ -283,6 +298,7 @@ class HotPlug:
             msg_dict['action'] = self.msg_actions['PLUG']
             self.client_send_rcv(msg_dict)
         self.sock.close()
+        return
 
     def handle_plug_request(self, msg_dict, _sock):
         print("Received a request to plug in cpu {}".format(msg_dict['cpu']))
@@ -311,6 +327,7 @@ class HotPlug:
             msg_dict['cpu'] = cpu
             self.client_send_rcv(msg_dict)
         self.sock.close()
+        return
 
     def handle_get_current_state(self, msg_dict, _sock):
         print("Received a request to get the current state of cpu {}".format(msg_dict['cpu']))
@@ -334,6 +351,7 @@ class HotPlug:
             msg_dict['cpu'] = cpu
             self.client_send_rcv(msg_dict)
         self.sock.close()
+        return
 
     def handle_set_target_state(self, msg_dict, _sock):
         print("Received a request to set target state {} for cpu {}".format(msg_dict['target_state'],
@@ -396,7 +414,15 @@ def hotplug_main(args):
 
     hotplug = HotPlug(args)
     if args.listen:
-        hotplug.server()
+        try:
+            hotplug.server()
+        except KeyboardInterrupt:
+            print("Exiting ...")
+            hotplug.sock.close()
+            os.remove(hotplug.sock_name)
+            sys.exit(0)
+
+
     else:
         try:
             hotplug.client()
