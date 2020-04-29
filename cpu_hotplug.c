@@ -642,6 +642,25 @@ exit:
 	return ccode;
 }
 
+int unlink_file(char *filename)
+{
+	int ccode = 0;
+
+	struct path name_path = {.mnt = 0};
+	if (!filename) {
+		return -EINVAL;
+	}
+
+	ccode = kern_path(filename, LOOKUP_FOLLOW, &name_path);
+	if (!ccode) {
+		ccode = vfs_unlink(name_path.dentry->d_parent->d_inode,
+				   name_path.dentry,
+				   NULL);
+	}
+	return ccode;
+}
+
+
 static int cpu_hotplug_init(void)
 {
 	int ccode = 0;
@@ -678,6 +697,7 @@ void __exit socket_interface_exit(void)
 	atomic64_set(&SHOULD_SHUTDOWN, 1);
 	awaken_accept_thread();
 	unlink_sock_name(socket_name, lockfile_name);
+	unlink_file(lockfile_name);
 	cpu_hotplug_cleanup();
 	return;
 }

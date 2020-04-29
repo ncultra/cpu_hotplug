@@ -177,6 +177,8 @@ size_t k_socket_write(struct socket *sock,
 		      void *out,
 		      unsigned int flags);
 
+int unlink_file(char *filename);
+
 
 /* connection struct is used for both listening and connected sockets */
 /* function pointers for listen, accept, close */
