@@ -116,6 +116,9 @@ static inline int check_magic(struct hotplug_msg *m)
 	return 0;
 }
 
+/**
+ * @brief: return 1 if all three version components (major, minor, release) match
+ **/
 static inline int check_version(struct hotplug_msg *m)
 {
 	if (!m) {
@@ -134,6 +137,23 @@ static inline int check_version(struct hotplug_msg *m)
 	return 0;
 }
 
+/**
+ * @brief: return 1 if the major version matches
+ *         a major version guarantees message structure and protocol
+ *         compatibility.
+ **/
+
+static inline int maj_ver_compat(struct hotplug_msg *m)
+{
+	if (!m) {
+		return 0;
+	}
+	if (GET_MAJOR_VERSION(m->version) == GET_MAJOR_VERSION(protocol_version)) {
+		return 1;
+	}
+
+	return 0;
+}
 
 void free_message(struct hotplug_msg *m);
 struct hotplug_msg *new_message(uint8_t *buf, size_t len);
