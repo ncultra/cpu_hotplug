@@ -24,6 +24,10 @@ static inline void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 		rep->cpu = req->cpu;
 		rep->action = req->action;
 		rep->result = 0;
+		memset(rep->possible_mask, 0x00, sizeof(rep->possible_mask));
+		memset(rep->present_mask, 0x00, sizeof(rep->present_mask));
+		memset(rep->online_mask, 0x00, sizeof(rep->online_mask));
+		memset(rep->active_mask, 0x00, sizeof(rep->active_mask));
 	}
 	return;
 }
@@ -102,7 +106,7 @@ int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 		return -EINVAL;
 	}
 
-	if (!check_magic(request) || !check_version(request)) {
+	if (!check_magic(request) || !maj_ver_compat(request)) {
 		return -EINVAL;
 	}
 
@@ -413,11 +417,6 @@ static void k_msg_server(struct kthread_work *work)
 		goto close_out;
 	}
 
-	if (! connection->connected) {
-		printk(KERN_DEBUG "message server: no socket!\n");
-		goto close_out;
-	}
-
 	ccode = down_interruptible(&connection->s_lock);
 	if (ccode) {
 		printk(KERN_DEBUG "message server: unable to down connection semaphore\n");
@@ -434,6 +433,10 @@ static void k_msg_server(struct kthread_work *work)
 		if (msg->magic == CONNECTION_MAGIC) {
 			struct hotplug_msg reply = {0};
 			if (!parse_hotplug_req(msg, &reply)) {
+				/**
+				 * we have succesfully created a response, so we can free
+				 * the read_buf now.
+				 **/
 				kzfree(read_buf);
 				read_buf = NULL;
 				switch (reply.msg_type) {
@@ -674,7 +677,7 @@ void __exit socket_interface_exit(void)
 {
 	atomic64_set(&SHOULD_SHUTDOWN, 1);
 	awaken_accept_thread();
-	unlink_sock_name(socket_name, NULL);
+	unlink_sock_name(socket_name, lockfile_name);
 	cpu_hotplug_cleanup();
 	return;
 }

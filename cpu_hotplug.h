@@ -69,6 +69,8 @@ extern uint32_t protocol_version;
  *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  **/
 
+
+
 #define GET_MAJOR_VERSION(v) (((v) & 0xff0000) >> 16)
 #define GET_MINOR_VERSION(v) (((v) & 0x00ff00) >> 8)
 #define GET_RELEASE_VERSION(v) ((v) & 0xff)
