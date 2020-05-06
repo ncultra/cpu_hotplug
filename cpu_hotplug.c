@@ -263,18 +263,6 @@ again:
 	return res;
 }
 
-bool init_and_queue_work(struct kthread_work *work,
-                         struct kthread_worker *worker,
-                         void (*function)(struct kthread_work *))
-{
-
-
-	kthread_init_work(work, function);
-	return kthread_queue_work(worker, work);
-
-}
-
-
 static void k_accept(struct kthread_work *work)
 {
 	int ccode = 0;
