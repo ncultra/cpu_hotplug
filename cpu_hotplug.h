@@ -26,6 +26,7 @@
 #include <linux/compiler.h>
 #include <asm/atomic64_64.h>
 #include <linux/printk.h>
+#include <linux/kallsyms.h>
 
 extern atomic64_t SHOULD_SHUTDOWN;
 extern struct list_head connections;
@@ -38,10 +39,10 @@ extern uint32_t protocol_version;
 #define _MODULE_AUTHOR "Mike Day"
 #define _MODULE_INFO "cpu hot-plug demo"
 
-#define assert(s) do { \
-	if (unlikely(!(s))) printk(KERN_DEBUG "assertion failed: " #s " at %s:%d\n", \
-				   __FILE__, __LINE__);			\
-} while(0)
+#define assert(s) do {							\
+		if (unlikely(!(s))) printk(KERN_DEBUG "assertion failed: " #s " at %s:%d\n", \
+					   __FILE__, __LINE__);		\
+	} while(0)
 
 
 /**
@@ -97,14 +98,14 @@ struct hotplug_msg
 	uint32_t current_state; /* 20 */
 	uint32_t target_state; /* 24 */
 	uint32_t result; /* 28 0 == success, non-zero == error */
-  /**
-   * see include/linux/cpumask.h for definitions.
-   * assume 512 potential cpu IDs.
-   **/
-  uint64_t possible_mask[8]; /* 32 */
-  uint64_t present_mask[8]; /* 96 */
-  uint64_t online_mask[8]; /* 160 */
-  uint64_t active_mask[8]; /* 224 */
+	/**
+	 * see include/linux/cpumask.h for definitions.
+	 * assume 512 potential cpu IDs.
+	 **/
+	uint64_t possible_mask[8]; /* 32 */
+	uint64_t present_mask[8]; /* 96 */
+	uint64_t online_mask[8]; /* 160 */
+	uint64_t active_mask[8]; /* 224 */
 } __attribute__((packed));
 
 #define CONNECTION_MAGIC ((uint32_t)0xf8cb820d)
@@ -114,6 +115,26 @@ struct hotplug_msg
 #define CONNECTION_MAX_MESSAGE CONNECTION_MAX_HEADER
 #define CONNECTION_MAX_REPLY CONNECTION_MAX_HEADER
 #define CONNECTION_PATH_MAX 0x200
+
+/* connection struct is used for both listening and connected sockets */
+/* function pointers for listen, accept, close */
+struct connection {
+	struct list_head l;
+	uint64_t flags;
+	struct semaphore s_lock;
+	struct kthread_work work;
+	struct kthread_worker *worker;
+	struct socket *connected;
+	uint8_t path[CONNECTION_PATH_MAX];
+};
+
+struct sym_import {
+	char name[KSYM_NAME_LEN];
+	uint64_t addr;
+};
+
+extern struct sym_import sym_imports[];
+#define SIZE_IMPORTS (sizeof(sym_imports) / sizeof(struct sym_import))
 
 static inline int check_magic(struct hotplug_msg *m)
 {
@@ -186,38 +207,10 @@ size_t k_socket_write(struct socket *sock,
 
 int unlink_file(char *filename);
 
-
-/* connection struct is used for both listening and connected sockets */
-/* function pointers for listen, accept, close */
-struct connection {
-	struct list_head l;
-	uint64_t flags;
-	struct semaphore s_lock;
-	struct kthread_work work;
-	struct kthread_worker *worker;
-	struct socket *connected;
-	uint8_t path[CONNECTION_PATH_MAX];
-};
-
-
 struct connection *init_connection(struct connection *c, uint64_t flags, void *p);
-
-
-/** kthread stuff **/
-
-#define CONT_CPU_ANY -1
-struct kthread_worker *create_worker(unsigned int flags, const char namefmt[], ...);
-
-void destroy_worker(struct kthread_worker *worker);
-
-void *destroy_work(struct kthread_work *work);
-
-bool init_and_queue_work(struct kthread_work *work,
-			 struct kthread_worker *worker,
-			 void (*function)(struct kthread_work *));
-
-
 int __init socket_interface_init(void);
 void __exit socket_interface_exit(void);
+
+
 
 #endif /** __CPU_HOTPLUG_H **/

@@ -18,6 +18,36 @@ char *socket_name = "/var/run/cpu_hotplug.sock";
 char *lockfile_name = "/var/run/cpu_hotplug.lock";
 module_param(socket_name, charp, 0644);
 
+int (*_cpu_report_state)(int) = NULL;
+
+struct sym_import sym_imports[] = {
+	{.name = "cpu_report_state",
+	 .addr = 0UL},
+};
+
+static int import_symbols(struct sym_import *imports, int size)
+{
+	for (int i = 0; i < size; i++) {
+		imports[i].addr = kallsyms_lookup_name(imports[i].name);
+		if (imports[i].addr == 0) {
+			return -ENFILE;
+		}
+	}
+	return 0;
+}
+
+static uint64_t __attribute__((used)) find_private(struct sym_import *imports,
+			    const char *name,
+			    int size)
+{
+	for (int i = 0; i < size; i++) {
+		if (! strncmp(name, imports[i].name, KSYM_NAME_LEN - 1)) {
+			return imports[i].addr;
+		}
+	}
+	return 0;
+}
+
 static void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	if (req && rep) {
@@ -116,6 +146,7 @@ int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
+	rep->current_state = (uint32_t)_cpu_report_state(req->cpu);
 	return 0;
 }
 
@@ -795,6 +826,25 @@ static void cpu_hotplug_cleanup(void)
 
 int __init socket_interface_init(void)
 {
+	int ccode = import_symbols(sym_imports, SIZE_IMPORTS);
+	printk(KERN_DEBUG "%s: %s %u import_symbols returned %d\n",
+	       __FILE__, __FUNCTION__, __LINE__,
+		ccode);
+	if (ccode) {
+		return ccode;
+	}
+
+	_cpu_report_state = (int (*)(int))find_private(sym_imports,
+					 "cpu_report_state",
+					 SIZE_IMPORTS);
+	printk(KERN_DEBUG "%s: %s %u address of cpu_report_state %016llx\n",
+	       __FILE__, __FUNCTION__, __LINE__,
+	       (uint64_t)_cpu_report_state);
+
+	if (_cpu_report_state == NULL) {
+		return -ENFILE;
+	}
+
 	INIT_LIST_HEAD_RCU(&connections);
 	atomic64_set(&SHOULD_SHUTDOWN, 0);
 	cpu_hotplug_init();
