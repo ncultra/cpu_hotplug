@@ -116,30 +116,13 @@ int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 	if (request->msg_type == REQUEST &&
 	    request->action > ZERO &&
 	    request->action < LAST) {
-    printk(KERN_DEBUG "%s: %s %u request header looks good, calling into dispatch table[%d]\n",
-           __FILE__, __FUNCTION__, __LINE__,
-           request->action);
+		printk(KERN_DEBUG "%s: %s %u request header looks good, calling into dispatch table[%d]\n",
+		       __FILE__, __FUNCTION__, __LINE__,
+		       request->action);
 		return dispatch_table[request->action](request, response);
 	}
 	return -EINVAL;
 }
-
-struct hotplug_msg *new_message(uint8_t *buf, size_t len)
-{
-	struct hotplug_msg *m = NULL;
-
-	if (!buf || len > CONNECTION_MAX_BUFFER || buf[len] != 0x00) {
-		return NULL;
-	}
-	m = kzalloc(sizeof(struct hotplug_msg), GFP_KERNEL);
-	if (!m) {
-		return NULL;
-	}
-	return m;
-}
-
-
-
 
 /**
  * sock refers to struct socket,
