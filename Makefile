@@ -37,8 +37,22 @@ modules:
 # e.g., sudo cp -v ~/src/linux/certs/* /usr/src/kernels/$(uname -r)/certs/
 # also see https://www.kernel.org/doc/html/v4.15/admin-guide/module-signing.html
 
+
 modules_install: sign
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules_install
+
+.PHONY: install
+install: modules_install
+
+.PHONY: run
+run: modules_install
+	modprobe cpu_hotplug
+	lsmod | grep cpu_hotplug
+
+.PHONY: unload
+unload:
+	rmmod cpu_hotplug
+	dmesg
 
 .PHONY: lint
 lint:

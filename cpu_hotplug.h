@@ -29,7 +29,7 @@
 
 extern atomic64_t SHOULD_SHUTDOWN;
 extern struct list_head connections;
-extern struct connection listener;
+extern struct connection *listener;
 extern char *socket_name;
 extern uint32_t protocol_version;
 
@@ -57,7 +57,6 @@ extern uint32_t protocol_version;
 #define SOCK_LISTEN    (1 << 0)
 #define SOCK_CONNECTED (1 << 1)
 #define SOCK_HAS_WORK  (1 << 2)
-
 
 /**
  * message protocol version
@@ -184,11 +183,10 @@ int unlink_file(char *filename);
 /* function pointers for listen, accept, close */
 struct connection {
 	struct list_head l;
-	uint64_t magic;
 	uint64_t flags;
 	struct semaphore s_lock;
 	struct kthread_work work;
-	struct kthread_worker worker;
+	struct kthread_worker *worker;
 	struct socket *connected;
 	uint8_t path[CONNECTION_PATH_MAX];
 };

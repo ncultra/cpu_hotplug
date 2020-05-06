@@ -55,3 +55,8 @@ dkms.conf
 *.*~*~
 # emacs recovery files
 \#*\#
+
+cscope.files
+
+# disassembled object code
+*.o.asm

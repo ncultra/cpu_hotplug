@@ -24,7 +24,7 @@ class HotPlug:
             self.is_client = 0
         else:
             self.is_client = 1
-        self.CONNECTION_MAGIC = 0xf8cb820f
+        self.CONNECTION_MAGIC = 0xf8cb820d
         self.magic = pack('=L', self.CONNECTION_MAGIC)
         self.PROTOCOL_VERSION = 0x00000100
         self.prot_ver = pack('!L', self.PROTOCOL_VERSION)
