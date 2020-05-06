@@ -124,20 +124,6 @@ int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 	return -EINVAL;
 }
 
-/**
- * free_message - and don't free the socket (kernel space)
- * or close the file (user space). The other end of the
- * connection may write or read using this socket (file)
- **/
-void free_message(struct hotplug_msg *m)
-{
-	if (m) {
-		kzfree(m);
-	}
-
-	return;
-}
-
 struct hotplug_msg *new_message(uint8_t *buf, size_t len)
 {
 	struct hotplug_msg *m = NULL;
