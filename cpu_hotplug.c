@@ -38,24 +38,78 @@ static void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 static int handle_invalid(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
-	return EINVAL;
+	rep->result = EINVAL;
+	return 0;
 }
 
 static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
+	rep->result = OK;
 	return 0;
 }
 
 int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
+	int ccode = OK;
+
 	init_reply(req, rep);
+	ccode = cpu_down(req->cpu);
+	switch(ccode) {
+	case OK:
+	{
+		rep->result = OK;
+		break;
+	}
+	case -EBUSY:
+	{
+		rep->result = _EBUSY;
+		break;
+	}
+	case -EPERM:
+	{
+		rep->result = _EPERM;
+		break;
+	}
+	case -EINVAL:
+	default:
+	{
+		rep->result = _EINVAL;
+		break;
+	}
+	}
 	return 0;
 }
 
 int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
+	int ccode = OK;
+
 	init_reply(req, rep);
+	ccode = cpu_up(req->cpu);
+	switch(ccode) {
+	case OK:
+	{
+		rep->result = OK;
+		break;
+	}
+	case -EBUSY:
+	{
+		rep->result = _EBUSY;
+		break;
+	}
+	case -EPERM:
+	{
+		rep->result = _EPERM;
+		break;
+	}
+	case -EINVAL:
+	default:
+	{
+		rep->result = _EINVAL;
+		break;
+	}
+	}
 	return 0;
 }
 
@@ -121,6 +175,13 @@ int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 		       request->action);
 		return dispatch_table[request->action](request, response);
 	}
+	else {
+		printk(KERN_DEBUG "%s: %s %u request header looks good but action %d is invalid\n",
+		       __FILE__, __FUNCTION__, __LINE__,
+			request->action);
+		return dispatch_table[0](request, response);
+	}
+
 	return -EINVAL;
 }
 

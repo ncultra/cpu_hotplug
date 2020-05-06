@@ -75,7 +75,15 @@ extern uint32_t protocol_version;
 #define GET_RELEASE_VERSION(v) ((v) & 0xff)
 
 enum message_type {EMPTY = 0, REQUEST, REPLY, COMPLETE};
+/**
+ * messages to add:
+ * cpu_hotplug enable see comment in kernel/cpu.c:281
+ * cpu_hotplug disable
+ * get_{possible, present, available, active} masks
+ **/
 enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_CURRENT_STATE, SET_TARGET_STATE, LAST};
+enum message_errors {OK = 0, _EINVAL = 2, MSG_TYPE, MSG_VERSION, NOT_HANDLED, _EBUSY, _EPERM};
+
 /** see linux/include/cpumask.h and kernel/cpu.c exported bitmasks **/
 
 
