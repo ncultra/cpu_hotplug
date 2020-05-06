@@ -143,6 +143,18 @@ int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 	return 0;
 }
 
+/**
+ * see linux/include/linux/cpu.h
+ * These states are not related to the core CPU hotplug mechanism. They are
+ * used by various (sub)architectures to track internal state
+ **/
+#define CPU_ONLINE		0x0002 /* CPU is up */
+#define CPU_UP_PREPARE		0x0003 /* CPU coming up */
+#define CPU_DEAD		0x0007 /* CPU dead */
+#define CPU_DEAD_FROZEN		0x0008 /* CPU timed out on unplug */
+#define CPU_POST_DEAD		0x0009 /* CPU successfully unplugged */
+#define CPU_BROKEN		0x000B /* CPU did not die properly */
+
 int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
