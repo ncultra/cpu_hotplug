@@ -17,6 +17,7 @@
 #include <linux/moduleparam.h>
 #include <linux/err.h>
 #include <linux/fs.h>
+#include <linux/file.h>
 #include <linux/namei.h>
 #include <linux/rculist.h>
 #include <linux/string.h>
@@ -28,6 +29,8 @@
 #include <linux/printk.h>
 #include <linux/kallsyms.h>
 #include <linux/preempt.h>
+
+
 
 extern atomic64_t SHOULD_SHUTDOWN;
 extern struct list_head connections;
@@ -213,6 +216,9 @@ size_t k_socket_write(struct socket *sock,
 		      unsigned int flags);
 
 int unlink_file(char *filename);
+int file_getattr(struct file *f, struct kstat *k);
+size_t write_file(char *name, void *buf, size_t count, loff_t * pos);
+size_t vfs_read_file(char *name, void **buf, size_t max_count, loff_t *pos);
 
 struct connection *init_connection(struct connection *c, uint64_t flags, void *p);
 int __init socket_interface_init(void);

@@ -18,6 +18,8 @@ char *socket_name = "/var/run/cpu_hotplug.sock";
 char *lockfile_name = "/var/run/cpu_hotplug.lock";
 module_param(socket_name, charp, 0644);
 
+int chunk_size = 0x400;
+
 static struct connection *reap_closed(void);
 static void *destroy_connection(struct connection *c);
 
@@ -857,6 +859,89 @@ int unlink_file(char *filename)
 	return ccode;
 }
 
+int file_getattr(struct file *f, struct kstat *k)
+{
+	int ccode = 0;
+	memset(k, 0x00, sizeof(struct kstat));
+	ccode = vfs_getattr(&f->f_path, k, 0x00000fffU, KSTAT_QUERY_FLAGS);
+	return ccode;
+}
+
+size_t write_file(char *name, void *buf, size_t count, loff_t * pos)
+{
+	ssize_t ccode;
+	struct file *f;
+	f = filp_open(name, O_RDWR, 0);
+	if (f) {
+		ccode = __kernel_write(f, buf, count, pos);
+		if (ccode < 0) {
+			pr_err("Unable to write file: %s (%ld)", name, ccode);
+		}
+		filp_close(f, 0);
+	} else {
+		ccode = -EBADF;
+		pr_err("Unable to open file: %s (%ld)", name, ccode);
+	}
+	return ccode;
+}
+
+size_t vfs_read_file(char *name, void **buf, size_t max_count, loff_t *pos)
+{
+	ssize_t ccode = 0;
+	struct file *f = NULL;
+
+	assert(buf);
+	*buf = NULL;
+	assert(pos);
+	*pos = 0LL;
+
+	f = filp_open(name, O_RDONLY, 0);
+	if (f) {
+		ssize_t chunk = chunk_size, allocated = 0, cursor = 0;
+		*buf = kzalloc(chunk, GFP_KERNEL);
+		if (*buf) {
+			allocated = chunk;
+		} else {
+			ccode =  -ENOMEM;
+			goto out_err;
+		}
+
+		do {
+			/**
+			 * read one chunk at a time
+			 **/
+			cursor = *pos; /* initially zero, then positioned with further reads */
+			ccode = kernel_read(f, *buf + cursor, chunk, pos);
+			if (ccode < 0) {
+				pr_err("Unable to read file chunk: %s (%ld)", name, ccode);
+				goto out_err;
+			}
+			if (ccode > 0) {
+				*buf = krealloc(*buf, allocated + chunk, GFP_KERNEL);
+				if (! *buf) {
+					ccode = -ENOMEM;
+					goto out_err;
+				}
+				allocated += chunk;
+			}
+		} while (ccode && allocated <= max_count);
+		filp_close(f, 0);
+	} else {
+		ccode = -EBADF;
+		pr_err("Unable to open file: %s (%ld)", name, ccode);
+	}
+	return ccode;
+
+out_err:
+	if (f) {
+		filp_close(f, 0);
+	}
+	if  (*buf) {
+		kfree(*buf);
+		*buf = NULL;
+	}
+	return ccode;
+}
 
 static int cpu_hotplug_init(void)
 {
