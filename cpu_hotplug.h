@@ -27,6 +27,7 @@
 #include <asm/atomic64_64.h>
 #include <linux/printk.h>
 #include <linux/kallsyms.h>
+#include <linux/preempt.h>
 
 extern atomic64_t SHOULD_SHUTDOWN;
 extern struct list_head connections;

@@ -36,7 +36,7 @@ static int import_symbols(struct sym_import *imports, int size)
 	return 0;
 }
 
-static uint64_t __attribute__((used)) find_private(struct sym_import *imports,
+static uint64_t find_private(struct sym_import *imports,
 			    const char *name,
 			    int size)
 {
@@ -162,7 +162,7 @@ int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 	return 0;
 }
 
-int handle_set_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
+int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
 	return 0;
@@ -174,7 +174,7 @@ dispatch_t dispatch_table[] = {
 	handle_unplug,
 	handle_plug,
 	handle_get_cur_state,
-	handle_set_cur_state,
+	handle_set_target_state,
 	handle_invalid
 };
 
@@ -463,7 +463,7 @@ static void link_new_connection_work(struct connection *c,
 static void *destroy_connection(struct connection *c)
 {
 	if (down_interruptible(&c->s_lock))
-		return c;
+		return NULL;
 	if (c->worker) {
 		/**
 		 * flushes work, frees worker
@@ -476,7 +476,6 @@ static void *destroy_connection(struct connection *c)
 		sock_release(c->connected);
 		c->connected = NULL;
 	}
-	up(&c->s_lock);
 	memset(c, 0x00, sizeof(*c));
 	return c;
 }
@@ -712,7 +711,7 @@ err_exit:
 	return ERR_PTR(ccode);
 }
 
-static void awaken_accept_thread(void)
+static void __attribute__((used)) awaken_accept_thread(void)
 {
 	struct sockaddr_un addr;
 	struct socket *sock = NULL;
@@ -876,18 +875,33 @@ int __init socket_interface_init(void)
 	return 0;
 }
 
+
+
+/**
+ * the __exit routine is called with preemption disabled and will crash if it makes any
+ * calls capable of sleeping. There is more we should do here, but unloading is mostly
+ * useful for the development phase.
+ **/
 void __exit socket_interface_exit(void)
 {
+	struct connection *c = NULL;
 	atomic64_set(&SHOULD_SHUTDOWN, 1);
-	awaken_accept_thread();
-	unlink_sock_name(socket_name, lockfile_name);
 
 	/**
 	 * go through list of connections, destroy each connection
 	 **/
 
-	destroy_connection(listener);
-	kzfree(listener);
+	spin_lock(&connections_lock);
+	c = list_first_or_null_rcu(&connections, struct connection, l);
+	while (c != NULL) {
+		list_del_rcu(&c->l);
+		/**
+		 * don't call destroy_connection() because it calls flush_work()
+		 **/
+		kzfree(c);
+		c = list_first_or_null_rcu(&connections, struct connection, l);
+	}
+	spin_unlock(&connections_lock);
 	unlink_file(lockfile_name);
 	cpu_hotplug_cleanup();
 	return;
