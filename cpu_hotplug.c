@@ -18,6 +18,9 @@ char *socket_name = "/var/run/cpu_hotplug.sock";
 char *lockfile_name = "/var/run/cpu_hotplug.lock";
 module_param(socket_name, charp, 0644);
 
+static struct connection *reap_closed(void);
+static void *destroy_connection(struct connection *c);
+
 int (*_cpu_report_state)(int) = NULL;
 
 struct sym_import sym_imports[] = {
@@ -82,9 +85,11 @@ static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
 int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	int ccode = OK;
-
+	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	init_reply(req, rep);
+	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	ccode = cpu_down(req->cpu);
+	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	switch(ccode) {
 	case OK:
 	{
@@ -165,6 +170,7 @@ int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
+	rep->result = NOT_IMPL;
 	return 0;
 }
 
@@ -313,8 +319,6 @@ void *read_alloc_buf(struct socket *sock,
 	return buf;
 }
 
-
-
 size_t k_socket_write(struct socket *sock,
                       size_t size,
                       void *out,
@@ -373,7 +377,22 @@ static void k_accept(struct kthread_work *work)
 	 * create a new struct connection, link it to the global connections list
 	 **/
 	if (newsock != NULL && (! atomic64_read(&SHOULD_SHUTDOWN))) {
-		new_connection = kzalloc(sizeof(struct connection), GFP_KERNEL);
+		/**
+		 * first try to reap a closed connection
+		 **/
+		spin_lock(&connections_lock);
+		new_connection = reap_closed();
+		spin_unlock(&connections_lock);
+		if (new_connection != NULL) {
+			printk(KERN_DEBUG "%s: %s %u reaped closed connection %p\n",
+			       __FILE__, __FUNCTION__, __LINE__,
+				new_connection);
+			destroy_connection(new_connection);
+		}
+		else {
+			new_connection = kzalloc(sizeof(struct connection), GFP_KERNEL);
+		}
+
 		if (new_connection) {
 			printk(KERN_DEBUG "%s: %s %u new connection (created upon accept): %p\n",
 			       __FILE__, __FUNCTION__, __LINE__,
@@ -462,6 +481,7 @@ static void link_new_connection_work(struct connection *c,
  **/
 static void *destroy_connection(struct connection *c)
 {
+	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	if (down_interruptible(&c->s_lock))
 		return NULL;
 	if (c->worker) {
@@ -479,6 +499,40 @@ static void *destroy_connection(struct connection *c)
 	memset(c, 0x00, sizeof(*c));
 	return c;
 }
+
+/**
+ * must be called with connections_lock held
+ **/
+static struct connection *reap_closed(void)
+{
+	struct connection *cursor;
+	list_for_each_entry_rcu(cursor, &connections, l) {
+		if (cursor && __FLAG_IS_SET(CONNECTION_CLOSED, cursor->flags)) {
+			list_del_rcu(&cursor->l);
+			return cursor;
+		}
+
+	}
+	return NULL;
+}
+
+
+static int __attribute__((used)) reap_and_destroy(void)
+{
+	struct connection *dead;
+	int count = 0;
+	spin_lock(&connections_lock);
+	dead = reap_closed();
+	while (dead != NULL) {
+		destroy_connection(dead);
+		kzfree(dead);
+		count++;
+		dead = reap_closed();
+	}
+	spin_unlock(&connections_lock);
+	return count;
+}
+
 
 /**
  * dispatched from a kernel thread, has a connected socket
@@ -503,16 +557,14 @@ static void k_msg_server(struct kthread_work *work)
 	c = container_of(work, struct connection, work);
 	worker = c->worker;
 	sock = c->connected;
-
-	if (! (__FLAG_IS_SET(c->flags, SOCK_CONNECTED) &&
-	       __FLAG_IS_SET(c->flags, SOCK_HAS_WORK))) {
-		printk(KERN_DEBUG "message server: invalid connection flags\n");
-		goto close_out;
-	}
-
 	ccode = down_interruptible(&c->s_lock);
 	if (ccode) {
 		printk(KERN_DEBUG "message server: unable to down connection semaphore\n");
+		return;
+	}
+	if (! (__FLAG_IS_SET(c->flags, SOCK_CONNECTED) &&
+	       __FLAG_IS_SET(c->flags, SOCK_HAS_WORK))) {
+		printk(KERN_DEBUG "message server: invalid connection flags\n");
 		goto close_out;
 	}
 
@@ -576,34 +628,24 @@ static void k_msg_server(struct kthread_work *work)
 				}
 				case COMPLETE: {
 					/** client wishes to close the connection **/
-					goto unlock_connection;
+					goto close_out;
 					break;
 				}
 				default: {
 					printk(KERN_DEBUG "unexpected message type %d\n", reply.msg_type);
-					goto unlock_connection;
+					goto close_out;
 					break;
 				}
 				}
 			} /** parsed the message OK **/
 		} /** CONNECTION_MAGIC **/
 	} /** read_buf && read_size **/
-unlock_connection:
+close_out:
 	if (read_buf) {
 		kzfree(read_buf);
 	}
+	mark_conn_closed(c);
 	up(&c->s_lock);
-close_out:
-	spin_lock(&connections_lock);
-	list_del_rcu(&(c->l));
-	spin_unlock(&connections_lock);
-	synchronize_rcu();
-	printk(KERN_DEBUG "%s: %s %u destroying connection %p\n",
-	       __FILE__, __FUNCTION__, __LINE__,
-	       c);
-	destroy_connection(c);
-	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
-	kfree(c);
 	return;
 }
 
@@ -636,6 +678,8 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
  **/
 	c->flags = flags;
 	if (__FLAG_IS_SET(c->flags, SOCK_LISTEN)) {
+
+
 		/**
 		 * p is a pointer to a string holding the socket name
 		 **/
@@ -890,7 +934,7 @@ void __exit socket_interface_exit(void)
 	/**
 	 * go through list of connections, destroy each connection
 	 **/
-
+	unlink_sock_name(socket_name, lockfile_name);
 	spin_lock(&connections_lock);
 	c = list_first_or_null_rcu(&connections, struct connection, l);
 	while (c != NULL) {
@@ -902,6 +946,7 @@ void __exit socket_interface_exit(void)
 		c = list_first_or_null_rcu(&connections, struct connection, l);
 	}
 	spin_unlock(&connections_lock);
+
 	unlink_file(lockfile_name);
 	cpu_hotplug_cleanup();
 	return;

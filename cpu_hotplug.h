@@ -45,7 +45,6 @@ extern uint32_t protocol_version;
 					   __FILE__, __LINE__);		\
 	} while(0)
 
-
 /**
  * TODO:  https://lwn.net/Articles/588444/
  * checking for unused flags
@@ -56,10 +55,10 @@ extern uint32_t protocol_version;
 #define __FLAG_IS_SET(flag, bits) ((flag) & (bits) ? 1 : 0)
 #define __FLAG_IS_IS_CLEAR(flag, bits) ((flag) & (bits) ? 0 : 1)
 
-#define SOCK_LISTEN    (1 << 0)
-#define SOCK_CONNECTED (1 << 1)
-#define SOCK_HAS_WORK  (1 << 2)
-
+#define SOCK_LISTEN       (1 << 0)
+#define SOCK_CONNECTED    (1 << 1)
+#define SOCK_HAS_WORK     (1 << 2)
+#define CONNECTION_CLOSED (1 << 3)
 /**
  * message protocol version
  * note: NETWORK BYTE ORDER
@@ -69,8 +68,6 @@ extern uint32_t protocol_version;
  *   |    release    |    minor      |  major        | reserved      |
  *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  **/
-
-
 
 #define GET_MAJOR_VERSION(v) (((v) & 0xff0000) >> 16)
 #define GET_MINOR_VERSION(v) (((v) & 0x00ff00) >> 8)
@@ -84,7 +81,7 @@ enum message_type {EMPTY = 0, REQUEST, REPLY, COMPLETE};
  * get_{possible, present, available, active} masks
  **/
 enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_CURRENT_STATE, SET_TARGET_STATE, LAST};
-enum message_errors {OK = 0, _EINVAL = 2, MSG_TYPE, MSG_VERSION, NOT_HANDLED, _EBUSY, _EPERM};
+enum message_errors {OK = 0, _EINVAL = 2, MSG_TYPE, MSG_VERSION, NOT_HANDLED, _EBUSY, _EPERM, NOT_IMPL};
 
 /** see linux/include/cpumask.h and kernel/cpu.c exported bitmasks **/
 
@@ -128,6 +125,15 @@ struct connection {
 	struct socket *connected;
 	uint8_t path[CONNECTION_PATH_MAX];
 };
+
+/**
+ * call with c->s_lock held
+ **/
+static inline void mark_conn_closed(struct connection *c)
+{
+  __CLEAR_FLAG(c->flags, SOCK_CONNECTED);
+  __SET_FLAG(c->flags, CONNECTION_CLOSED);
+}
 
 struct sym_import {
 	char name[KSYM_NAME_LEN];

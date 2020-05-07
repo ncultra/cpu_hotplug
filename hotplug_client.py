@@ -32,7 +32,7 @@ class HotPlug:
         self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3, 'GET_CURRENT_STATE': 4,
                             'SET_TARGET_STATE': 5, 'LAST': 6}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
-                       'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7}
+                       'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8}
 
     def server(self):
         try:
