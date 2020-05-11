@@ -87,11 +87,8 @@ static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
 int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	int ccode = OK;
-	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	init_reply(req, rep);
-	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	ccode = cpu_down(req->cpu);
-	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	switch(ccode) {
 	case OK:
 	{
@@ -273,15 +270,9 @@ int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 	if (request->msg_type == REQUEST &&
 	    request->action > ZERO &&
 	    request->action < LAST) {
-		printk(KERN_DEBUG "%s: %s %u request header looks good, calling into dispatch table[%d]\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-		       request->action);
 		return dispatch_table[request->action](request, response);
 	}
 	else {
-		printk(KERN_DEBUG "%s: %s %u request header looks good but action %d is invalid\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-			request->action);
 		return dispatch_table[0](request, response);
 	}
 
@@ -302,10 +293,6 @@ size_t k_socket_read(struct socket *sock,
 	size_t res = 0;
 	struct msghdr msg = {.msg_flags = flags};
 	struct kvec iov = {.iov_base = in, .iov_len = size};
-	printk(KERN_DEBUG "%s: %s %u k_socket_read sock %p, num bytes to read %ld," \
-         " in buf %p, flags %x\n",
-         __FILE__, __FUNCTION__, __LINE__,
-         sock, size, in, flags);
 again:
 	res = kernel_recvmsg(sock, &msg, &iov, 1, size, flags);
 	if (res == -EAGAIN)
@@ -336,7 +323,6 @@ void *read_alloc_buf(struct socket *sock,
 
 	buf = kzalloc(max_size, GFP_KERNEL);
 	if (buf == NULL) {
-		printk(KERN_DEBUG "kzalloc returned NULL\n");
 		return buf;
 	}
 
@@ -346,7 +332,7 @@ void *read_alloc_buf(struct socket *sock,
 			printk(KERN_DEBUG "recvmsg returned error %ld\n", bytes_read);
 		}
 		else if (bytes_read == 0) {
-			printk(KERN_DEBUG "recvmsg read zero bytes\n");
+			;
 		}
 		kfree(buf);
 		return NULL;
@@ -356,19 +342,9 @@ void *read_alloc_buf(struct socket *sock,
 		kzfree(buf);
 		return NULL;
 	}
-  printk(KERN_DEBUG "%s: %s %u recvmsg returned %ld bytes\n",
-         __FILE__, __FUNCTION__, __LINE__,
-         bytes_read);
 	*actual_size = bytes_read;
-  printk(KERN_DEBUG "%s: %s %u %ld bytes stored in  buf %p\n",
-         __FILE__, __FUNCTION__, __LINE__,
-         *actual_size,
-         buf);
 	if (max_size != *actual_size) {
 		buf = krealloc(buf, bytes_read, GFP_KERNEL);
-    printk(KERN_DEBUG "%s: %s %u buf: %p\n",
-           __FILE__, __FUNCTION__, __LINE__,
-           buf);
 	}
 	return buf;
 }
@@ -407,7 +383,6 @@ static void k_accept(struct kthread_work *work)
 	}
 	connection = container_of(work, struct connection, work);
 	worker = connection->worker;
-	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	/**
 	 * the unix socket implementation masks out MSG_DONTWAIT,
 	 * and then uses O_NONBLOCK internally when handling queued skbs.
@@ -438,9 +413,6 @@ static void k_accept(struct kthread_work *work)
 		new_connection = reap_closed();
 		spin_unlock(&connections_lock);
 		if (new_connection != NULL) {
-			printk(KERN_DEBUG "%s: %s %u reaped closed connection %p\n",
-			       __FILE__, __FUNCTION__, __LINE__,
-				new_connection);
 			destroy_connection(new_connection);
 		}
 		else {
@@ -448,9 +420,6 @@ static void k_accept(struct kthread_work *work)
 		}
 
 		if (new_connection) {
-			printk(KERN_DEBUG "%s: %s %u new connection (created upon accept): %p\n",
-			       __FILE__, __FUNCTION__, __LINE__,
-			       new_connection);
 			/**
 			 * init_connection will create a kernel thread for the new connection
 			 **/
@@ -464,9 +433,6 @@ close_out_reschedule:
 	if (! atomic64_read(&SHOULD_SHUTDOWN)) {
 		kthread_init_work(work, k_accept);
 		is_queued = kthread_queue_work(worker, work);
-		printk(KERN_DEBUG "%s: %s %u kthread_queue_work() returned %d\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-		       is_queued);
 	}
 close_out_quit:
 	up(&connection->s_lock);
@@ -535,7 +501,6 @@ static void link_new_connection_work(struct connection *c,
  **/
 static void *destroy_connection(struct connection *c)
 {
-	printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 	if (down_interruptible(&c->s_lock))
 		return NULL;
 	if (c->worker) {
@@ -622,10 +587,6 @@ static void k_msg_server(struct kthread_work *work)
 		goto close_out;
 	}
 
-	printk(KERN_DEBUG "%s: %s %u about to read connection %p\n",
-	       __FILE__, __FUNCTION__, __LINE__,
-	       c);
-
 	read_buf = read_alloc_buf(sock, CONNECTION_MAX_MESSAGE, &read_size);
 	if (read_buf && read_size == CONNECTION_MAX_MESSAGE) {
 		/**
@@ -633,16 +594,6 @@ static void k_msg_server(struct kthread_work *work)
 		 **/
 		struct hotplug_msg *msg = (struct hotplug_msg *)read_buf;
 
-		printk(KERN_DEBUG "%s: %s %u read %ld bytes from connection %p into buffer %p\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-		       read_size,
-		       c,
-		       read_buf);
-
-		printk(KERN_DEBUG "%s: %s %u %x %x\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-		       msg->magic,
-		       CONNECTION_MAGIC);
 		if (msg->magic == CONNECTION_MAGIC) {
 			struct hotplug_msg reply = {0};
 			int ccode;
@@ -651,16 +602,12 @@ static void k_msg_server(struct kthread_work *work)
 				 * we have succesfully created a response, so we can free
 				 * the read_buf now.
 				 **/
-				printk(KERN_DEBUG "%s: %s %u parse_hotplug_req returned %d\n",
-				       __FILE__, __FUNCTION__, __LINE__,
-				       ccode);
 				kzfree(read_buf);
 				read_buf = NULL;
 				switch (reply.msg_type) {
 				case REPLY: {
 					size_t bytes_written = 0;
 
-					printk(KERN_DEBUG "%s: %s %u\n", __FILE__, __FUNCTION__, __LINE__);
 					bytes_written = k_socket_write(sock,
 								       sizeof(struct hotplug_msg),
 								       &reply,
@@ -673,9 +620,6 @@ static void k_msg_server(struct kthread_work *work)
 						 **/
 						is_queued =kthread_queue_work(worker, work);
 						up(&c->s_lock);
-						printk(KERN_DEBUG "%s: %s %u kthread_queue_work() returned %d\n",
-						       __FILE__, __FUNCTION__, __LINE__,
-						       is_queued);
 						return;
 					}
 					break;
@@ -718,10 +662,6 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 	assert(__FLAG_IS_SET(flags, SOCK_LISTEN) || __FLAG_IS_SET(flags, SOCK_CONNECTED));
 	assert(! (__FLAG_IS_SET(flags, SOCK_LISTEN) && __FLAG_IS_SET(flags, SOCK_CONNECTED)));
 
-	printk(KERN_DEBUG "%s: %s %u initializing new connection %p %s\n",
-	       __FILE__, __FUNCTION__, __LINE__,
-	       c,
-	       (char *)p);
 	memset(c, 0x00, sizeof(struct connection));
 	INIT_LIST_HEAD(&(c->l));
 	sema_init(&(c->s_lock), 1);
@@ -737,20 +677,12 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 		/**
 		 * p is a pointer to a string holding the socket name
 		 **/
-		printk(KERN_DEBUG "%s: %s %u initializing the listener, connection: %p %s\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-		       c, (char *)p);
 		c->worker = kthread_create_worker(0, "listener");
 		if (c->worker == ERR_PTR(-ENOMEM)) {
 			c->worker = NULL;
 			ccode = -ENOMEM;
 			goto err_exit;
 		}
-
-		printk(KERN_DEBUG "%s: %s %u running server for connection %p\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-		       c);
-
 
 		strncpy(c->path, (const char *)p, CONNECTION_PATH_MAX - 1);
 		/**
@@ -768,9 +700,6 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 		 **/
 		kthread_init_work(&c->work, k_accept);
 		is_queued = kthread_queue_work(c->worker, &c->work);
-		printk(KERN_DEBUG "%s: %s %u kthread_queue_work() returned %d\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-			is_queued);
 	} else {
 		/**
 		 * new sock is accepted and a new
@@ -779,10 +708,6 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 		 **/
 		/** now we need to read and write messages **/
 		c->connected = (struct socket *)p;
-		printk(KERN_DEBUG "%s: %s %u initializing the new session connection %p , using socket %p\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-		       c, c->connected);
-
 		c->worker = kthread_create_worker(0, "server thread");
 		if (c->worker == ERR_PTR(-ENOMEM)) {
 			c->worker = NULL;
@@ -792,9 +717,6 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
 		link_new_connection_work(c, &connections);
 		kthread_init_work(&c->work, k_msg_server);
 		is_queued = kthread_queue_work(c->worker, &c->work);
-		printk(KERN_DEBUG "%s: %s %u kthread_queue_work() returned %d\n",
-		       __FILE__, __FUNCTION__, __LINE__,
-			is_queued);
 	}
 	return c;
 
@@ -1076,9 +998,6 @@ static void cpu_hotplug_cleanup(void)
 int __init socket_interface_init(void)
 {
 	int ccode = import_symbols(sym_imports, SIZE_IMPORTS);
-	printk(KERN_DEBUG "%s: %s %u import_symbols returned %d\n",
-	       __FILE__, __FUNCTION__, __LINE__,
-		ccode);
 	if (ccode) {
 		return ccode;
 	}
@@ -1086,10 +1005,6 @@ int __init socket_interface_init(void)
 	_cpu_report_state = (int (*)(int))find_private(sym_imports,
 					 "cpu_report_state",
 					 SIZE_IMPORTS);
-	printk(KERN_DEBUG "%s: %s %u address of cpu_report_state %016llx\n",
-	       __FILE__, __FUNCTION__, __LINE__,
-	       (uint64_t)_cpu_report_state);
-
 	if (_cpu_report_state == NULL) {
 		return -ENFILE;
 	}
@@ -1106,9 +1021,6 @@ int __init socket_interface_init(void)
 		return -ENOMEM;
 	}
 
-	printk(KERN_DEBUG "%s: %s %u calling init_connection with listening connection %p\n",
-	       __FILE__, __FUNCTION__, __LINE__,
-	       listener);
 	init_connection(listener, SOCK_LISTEN, socket_name);
 	return 0;
 }
@@ -1124,6 +1036,8 @@ void __exit socket_interface_exit(void)
 {
 	struct connection *c = NULL;
 	atomic64_set(&SHOULD_SHUTDOWN, 1);
+	cpu_hotplug_cleanup();
+	awaken_accept_thread();
 
 	/**
 	 * go through list of connections, destroy each connection
@@ -1136,13 +1050,13 @@ void __exit socket_interface_exit(void)
 		/**
 		 * don't call destroy_connection() because it calls flush_work()
 		 **/
+//		destroy_connection(c);
 		kzfree(c);
 		c = list_first_or_null_rcu(&connections, struct connection, l);
 	}
 	spin_unlock(&connections_lock);
 
 	unlink_file(lockfile_name);
-	cpu_hotplug_cleanup();
 	return;
 }
 
