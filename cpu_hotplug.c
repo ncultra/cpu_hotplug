@@ -20,8 +20,8 @@ module_param(socket_name, charp, 0644);
 
 static struct connection *reap_closed(void);
 static void *destroy_connection(struct connection *c);
-static int32_t  __attribute__((used)) read_cpu_state_file(int cpu);
-
+static int32_t  read_cpu_state_file(int cpu);
+static int write_cpu_target_file(int cpu, int target);
 
 int (*_cpu_report_state)(int) = NULL;
 
@@ -201,8 +201,26 @@ int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 
 int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
+	int ccode = 0;
+
 	init_reply(req, rep);
-	rep->result = NOT_IMPL;
+	ccode = write_cpu_target_file(req->cpu, req->target_state);
+	if (ccode < 0) {
+		switch(ccode) {
+		case -EBADF:
+			rep->result = _EBADF;
+			break;
+		case -ERANGE:
+			rep->result = _ERANGE;
+			break;
+		default:
+			rep->result = _EINVAL;
+			break;
+		}
+	}
+	else {
+		rep->result = 0;
+	}
 	return 0;
 }
 
@@ -217,18 +235,21 @@ dispatch_t dispatch_table[] = {
 	handle_invalid
 };
 
+/**
+ * @brief: called with interrupts disabled, no blocking
+ **/
 static int my_cpu_online(unsigned int cpu)
 {
 	int ccode = 0;
-	printk(KERN_DEBUG "cpu %d coming online\n", cpu);
 	return ccode;
 }
 
-
+/**
+ * @brief: called with interrupts disabled, no blocking
+ **/
 static int my_cpu_going_offline(unsigned int cpu)
 {
 	int ccode = 0;
-	printk(KERN_DEBUG "cpu %d going offline\n", cpu);
 	return ccode;
 }
 
@@ -916,7 +937,7 @@ size_t write_file(char *name, void *buf, size_t count, loff_t * pos)
 	return ccode;
 }
 
-size_t vfs_read_file(char *name, void **buf, size_t max_count, loff_t *pos)
+size_t read_file(char *name, void **buf, size_t max_count, loff_t *pos)
 {
 	ssize_t ccode = 0;
 	struct file *f = NULL;
@@ -979,7 +1000,7 @@ out_err:
  * @brief: returns >= 0 upon success, < 0 upon error. Error will be one of
  *         -ENOMEM, -EBADF, -ERANGE
  **/
-static int32_t  __attribute__((used)) read_cpu_state_file(int cpu)
+static int32_t read_cpu_state_file(int cpu)
 {
 	int state = 0;
 	int ccode = 0;
@@ -992,10 +1013,10 @@ static int32_t  __attribute__((used)) read_cpu_state_file(int cpu)
 			 "/sys/devices/system/cpu/cpu%d/hotplug/state",
 			 cpu);
 	if (ccode > 0) {
-		ccode = vfs_read_file(fname,
-				      &result,
-				      16,
-				      &pos);
+		ccode = read_file(fname,
+				  &result,
+				  16,
+				  &pos);
 		if (ccode > 0 && result != NULL) {
 			ccode = kstrtoint((const char *)result, 10, &state);
 			if (ccode >= 0) {
@@ -1009,23 +1030,45 @@ static int32_t  __attribute__((used)) read_cpu_state_file(int cpu)
 	return ccode;
 }
 
+
+static int write_cpu_target_file(int cpu, int target)
+{
+	int ccode = 0;
+	char fname[48] = {0};
+	char buf[16] = {0};
+	loff_t pos = 0;
+	if (target < 0 || target > 0x1ff) {
+		return -ERANGE;
+	}
+
+	ccode = snprintf(fname,
+			 48,
+			 "/sys/devices/system/cpu/cpu%d/hotplug/target",
+			 cpu);
+	if (ccode > 0) {
+		ccode = snprintf(buf, 16, "%d\n", target);
+		if (ccode > 0) {
+		  ccode = write_file(fname, buf, 16, &pos);
+		}
+	}
+	return ccode;
+}
+
+
 static int cpu_hotplug_init(void)
 {
 	int ccode = 0;
-	printk(KERN_DEBUG "cpu hotplug demo module\n");
 	ccode = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
 					  "x86/demo:online",
 					  my_cpu_online,
 					  my_cpu_going_offline);
 
-	printk(KERN_DEBUG "cpuhp_setup_state returned %d\n", ccode);
 	return 0;
 }
 
 
 static void cpu_hotplug_cleanup(void)
 {
-	printk(KERN_DEBUG "cpu hotplug demo unloading...\n");
 	cpuhp_remove_state_nocalls(CPUHP_AP_ONLINE_DYN);
 }
 
