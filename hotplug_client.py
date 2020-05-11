@@ -29,8 +29,8 @@ class HotPlug:
         self.PROTOCOL_VERSION = 0x00000100
         self.prot_ver = pack('!L', self.PROTOCOL_VERSION)
         self.msg_types = {'EMPTY': 0, 'REQUEST': 1, 'REPLY': 2, 'COMPLETE': 3}
-        self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3, 'GET_CURRENT_STATE': 4,
-                            'SET_TARGET_STATE': 5, 'LAST': 6}
+        self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3, 'GET_BOOT_STATE': 4, 'GET_CURRENT_STATE': 5,
+                            'SET_TARGET_STATE': 6, 'LAST': 7}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8,
                        'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11}
@@ -104,6 +104,9 @@ class HotPlug:
             return
         elif (self.args.plug is True) and (self.args.cpu_list is not None):
             self.send_plug_request(msg_dict, self.args.cpu_list)
+            return
+        elif (self.args.get_boot_state is True) and (self.args.cpu_list is not None):
+            self.send_get_boot_state_request(msg_dict, self.args.cpu_list)
             return
         elif (self.args.get_state is True) and (self.args.cpu_list is not None):
             self.send_get_current_state_request(msg_dict, self.args.cpu_list)
@@ -246,6 +249,10 @@ class HotPlug:
             self.handle_plug_request(request, _sock)
             return
 
+        if request['action'] == self.msg_actions['GET_BOOT_STATE']:
+            self.handle_get_boot_state(request, _sock)
+            return
+
         if request['action'] == self.msg_actions['GET_CURRENT_STATE']:
             self.handle_get_current_state(request, _sock)
             return
@@ -315,6 +322,26 @@ class HotPlug:
         except IOError:
             print("Error writing to {}".format(path))
             msg_dict['result'] = self.errors['NOT_HANDLED']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
+
+    def send_get_boot_state_request(self, msg_dict, cpu_list):
+        """msg_dict is a template for the request message,
+           cpu_list is a list of the cpus to be unplugged"""
+        msg_dict['action'] = self.msg_actions['GET_BOOT_STATE']
+        for cpu in cpu_list:
+            print("sending for cpu {}".format(cpu))
+            msg_dict['cpu'] = cpu
+            self.client_send_rcv(msg_dict)
+        self.sock.close()
+        return
+
+    def handle_get_boot_state(self, msg_dict, _sock):
+        """this request is only handled by the linux kernel module"""
+        print("Received a request to get the boot state of cpu {}".format(msg_dict['cpu']))
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        msg_dict['result'] = self.errors['NOT_HANDLED']
         reply = self.pack_message(msg_dict)
         self.write_packed_message(_sock, reply)
         return
@@ -405,6 +432,7 @@ def hotplug_main(args):
     parser.add_argument('--discover', action = 'store_true', help = 'send a discovery request')
     parser.add_argument('--unplug', action = 'store_true', help = 'unplug one or more cpus')
     parser.add_argument('--plug', action = 'store_true', help = 'plug in one or more cpus')
+    parser.add_argument('--get_boot_state', action = 'store_true', help = 'get the boot state of one or more cpus')
     parser.add_argument('--get_state', action = 'store_true', help = 'get the current state of one or more cpus')
     parser.add_argument('--set_target', action = 'store', nargs = 1, type = int,
                         help = 'set the target state state for one or more cpus')
