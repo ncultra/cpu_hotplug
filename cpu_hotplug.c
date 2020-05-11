@@ -162,6 +162,15 @@ int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 #define CPU_POST_DEAD		0x0009 /* CPU successfully unplugged */
 #define CPU_BROKEN		0x000B /* CPU did not die properly */
 
+
+int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	init_reply(req, rep);
+	rep->current_state = (uint32_t)_cpu_report_state(req->cpu);
+	return 0;
+}
+
+
 int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	int32_t ccode = 0;
@@ -202,6 +211,7 @@ dispatch_t dispatch_table[] = {
 	handle_discover,
 	handle_unplug,
 	handle_plug,
+	handle_get_boot_state,
 	handle_get_cur_state,
 	handle_set_target_state,
 	handle_invalid

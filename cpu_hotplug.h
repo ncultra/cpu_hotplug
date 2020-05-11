@@ -84,7 +84,7 @@ enum message_type {EMPTY = 0, REQUEST, REPLY, COMPLETE};
  * cpu_hotplug disable
  * get_{possible, present, available, active} masks
  **/
-enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_BOOTING_STATE, GET_CURRENT_STATE, SET_TARGET_STATE, LAST};
+enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_BOOT_STATE, GET_CURRENT_STATE, SET_TARGET_STATE, LAST};
 enum message_errors {OK = 0, _EINVAL = 2, MSG_TYPE, MSG_VERSION, NOT_HANDLED, _EBUSY, _EPERM, NOT_IMPL,
 		     _ENOMEM, _EBADF, _ERANGE};
 
