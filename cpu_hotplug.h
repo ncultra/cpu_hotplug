@@ -1,6 +1,7 @@
 #ifndef __CPU_HOTPLUG_H
 #define __CPU_HOTPLUG_H
 
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/printk.h>
 #include <linux/cpu.h>
@@ -84,7 +85,8 @@ enum message_type {EMPTY = 0, REQUEST, REPLY, COMPLETE};
  * get_{possible, present, available, active} masks
  **/
 enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_CURRENT_STATE, SET_TARGET_STATE, LAST};
-enum message_errors {OK = 0, _EINVAL = 2, MSG_TYPE, MSG_VERSION, NOT_HANDLED, _EBUSY, _EPERM, NOT_IMPL};
+enum message_errors {OK = 0, _EINVAL = 2, MSG_TYPE, MSG_VERSION, NOT_HANDLED, _EBUSY, _EPERM, NOT_IMPL,
+		     _ENOMEM, _EBADF, _ERANGE};
 
 /** see linux/include/cpumask.h and kernel/cpu.c exported bitmasks **/
 

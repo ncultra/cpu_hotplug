@@ -18,10 +18,10 @@ char *socket_name = "/var/run/cpu_hotplug.sock";
 char *lockfile_name = "/var/run/cpu_hotplug.lock";
 module_param(socket_name, charp, 0644);
 
-int chunk_size = 0x400;
-
 static struct connection *reap_closed(void);
 static void *destroy_connection(struct connection *c);
+static int32_t  __attribute__((used)) read_cpu_state_file(int cpu);
+
 
 int (*_cpu_report_state)(int) = NULL;
 
@@ -164,8 +164,29 @@ int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 
 int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
+	int32_t ccode = 0;
 	init_reply(req, rep);
-	rep->current_state = (uint32_t)_cpu_report_state(req->cpu);
+	ccode = read_cpu_state_file(req->cpu);
+	if (ccode < 0) {
+		switch(ccode) {
+		case -ENOMEM:
+			rep->result = _ENOMEM;
+			break;
+		case -EBADF:
+			rep->result = _EBADF;
+			break;
+		case -ERANGE:
+			rep->result = _ERANGE;
+			break;
+		default:
+			rep->result = _EINVAL;
+			break;
+		}
+	}
+	else {
+		rep->result = 0;
+		rep->current_state = ccode;
+	}
 	return 0;
 }
 
@@ -897,7 +918,7 @@ size_t vfs_read_file(char *name, void **buf, size_t max_count, loff_t *pos)
 
 	f = filp_open(name, O_RDONLY, 0);
 	if (f) {
-		ssize_t chunk = chunk_size, allocated = 0, cursor = 0;
+		ssize_t chunk = 0x40, allocated = 0, cursor = 0;
 		*buf = kzalloc(chunk, GFP_KERNEL);
 		if (*buf) {
 			allocated = chunk;
@@ -939,6 +960,41 @@ out_err:
 	if  (*buf) {
 		kfree(*buf);
 		*buf = NULL;
+	}
+	return ccode;
+}
+
+
+/**
+ * @brief: returns >= 0 upon success, < 0 upon error. Error will be one of
+ *         -ENOMEM, -EBADF, -ERANGE
+ **/
+static int32_t  __attribute__((used)) read_cpu_state_file(int cpu)
+{
+	int state = 0;
+	int ccode = 0;
+	char fname[48] = {0};
+	void *result = NULL;
+	loff_t pos = 0;
+
+	ccode = snprintf(fname,
+			 48,
+			 "/sys/devices/system/cpu/cpu%d/hotplug/state",
+			 cpu);
+	if (ccode > 0) {
+		ccode = vfs_read_file(fname,
+				      &result,
+				      16,
+				      &pos);
+		if (ccode > 0 && result != NULL) {
+			ccode = kstrtoint((const char *)result, 10, &state);
+			if (ccode >= 0) {
+				ccode = (int32_t)state;
+			}
+		}
+	}
+	if (result != NULL) {
+		kzfree(result);
 	}
 	return ccode;
 }
