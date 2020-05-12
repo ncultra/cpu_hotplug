@@ -1048,12 +1048,14 @@ void __exit socket_interface_exit(void)
   c = list_first_entry_or_null(&connections, struct connection, l);
 	while (c != NULL) {
 		list_del(&c->l);
+    spin_unlock(&connections_lock);
 
 		/**
 		 * don't call destroy_connection() because it calls flush_work()
 		 **/
 		destroy_connection(c);
 		kzfree(c);
+    spin_lock(&connections_lock);
 		c = list_first_entry_or_null(&connections, struct connection, l);
 	}
 	spin_unlock(&connections_lock);
