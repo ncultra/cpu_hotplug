@@ -489,7 +489,7 @@ static void link_new_connection_work(struct connection *c,
 
 	if (! atomic64_read(&SHOULD_SHUTDOWN)) {
 		spin_lock(&connections_lock);
-		list_add_rcu(&(c->l), l);
+		list_add(&(c->l), l);
 		spin_unlock(&connections_lock);
 		__SET_FLAG(c->flags, SOCK_HAS_WORK);
 	}
@@ -525,9 +525,9 @@ static void *destroy_connection(struct connection *c)
 static struct connection *reap_closed(void)
 {
 	struct connection *cursor;
-	list_for_each_entry_rcu(cursor, &connections, l) {
+	list_for_each_entry(cursor, &connections, l) {
 		if (cursor && __FLAG_IS_SET(CONNECTION_CLOSED, cursor->flags)) {
-			list_del_rcu(&cursor->l);
+			list_del(&cursor->l);
 			return cursor;
 		}
 
@@ -1009,7 +1009,7 @@ int __init socket_interface_init(void)
 		return -ENFILE;
 	}
 
-	INIT_LIST_HEAD_RCU(&connections);
+	INIT_LIST_HEAD(&connections);
 	atomic64_set(&SHOULD_SHUTDOWN, 0);
 	cpu_hotplug_init();
 	unlink_sock_name(socket_name, lockfile_name);
@@ -1044,15 +1044,17 @@ void __exit socket_interface_exit(void)
 	 **/
 	unlink_sock_name(socket_name, lockfile_name);
 	spin_lock(&connections_lock);
-	c = list_first_or_null_rcu(&connections, struct connection, l);
+
+  c = list_first_entry_or_null(&connections, struct connection, l);
 	while (c != NULL) {
-		list_del_rcu(&c->l);
+		list_del(&c->l);
+
 		/**
 		 * don't call destroy_connection() because it calls flush_work()
 		 **/
-//		destroy_connection(c);
+		destroy_connection(c);
 		kzfree(c);
-		c = list_first_or_null_rcu(&connections, struct connection, l);
+		c = list_first_entry_or_null(&connections, struct connection, l);
 	}
 	spin_unlock(&connections_lock);
 

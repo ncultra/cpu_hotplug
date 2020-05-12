@@ -20,7 +20,7 @@
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/namei.h>
-#include <linux/rculist.h>
+#include <linux/list.h>
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/semaphore.h>
