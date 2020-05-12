@@ -1,7 +1,6 @@
 #include "cpu_hotplug.h"
 
 atomic64_t SHOULD_SHUTDOWN = ATOMIC64_INIT(0);
-EXPORT_SYMBOL(SHOULD_SHUTDOWN);
 
 DEFINE_SPINLOCK(connections_lock);
 
@@ -9,10 +8,7 @@ struct list_head connections;
 
 struct connection *listener = NULL;
 
-EXPORT_SYMBOL(listener);
-
 uint32_t protocol_version = 0x010000;
-EXPORT_SYMBOL(protocol_version);
 
 char *socket_name = "/var/run/cpu_hotplug.sock";
 char *lockfile_name = "/var/run/cpu_hotplug.lock";
