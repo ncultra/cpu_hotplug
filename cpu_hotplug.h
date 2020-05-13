@@ -77,6 +77,21 @@ extern uint32_t protocol_version;
 #define GET_MINOR_VERSION(v) (((v) & 0x00ff00) >> 8)
 #define GET_RELEASE_VERSION(v) ((v) & 0xff)
 
+
+/**
+ * GET_BOOT_STATE rep->current_state values
+ * see linux/include/linux/cpu.h
+ * These states are not related to the core CPU hotplug mechanism. They are
+ * used by various (sub)architectures to track internal state
+ **/
+#define CPU_ONLINE		0x0002 /* CPU is up */
+#define CPU_UP_PREPARE		0x0003 /* CPU coming up */
+#define CPU_DEAD		0x0007 /* CPU dead */
+#define CPU_DEAD_FROZEN		0x0008 /* CPU timed out on unplug */
+#define CPU_POST_DEAD		0x0009 /* CPU successfully unplugged */
+#define CPU_BROKEN		0x000B /* CPU did not die properly */
+
+
 enum message_type {EMPTY = 0, REQUEST, REPLY, COMPLETE};
 /**
  * messages to add:

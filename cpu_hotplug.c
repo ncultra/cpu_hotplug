@@ -11,8 +11,22 @@ struct connection *listener = NULL;
 uint32_t protocol_version = 0x010000;
 
 char *socket_name = "/var/run/cpu_hotplug.sock";
-char *lockfile_name = "/var/run/cpu_hotplug.lock";
 module_param(socket_name, charp, 0644);
+
+char *lockfile_name = "/var/run/cpu_hotplug.lock";
+module_param(lockfile_name, charp, 0644);
+
+static struct file_lock f_lock = {
+	.fl_flags = FL_FLOCK,
+	.fl_type = F_WRLCK
+};
+
+static struct file *f_lock_file = NULL;
+
+static struct file *open_lock_file(char *lock_name);
+static int close_lock_file(struct file *f);
+static int lock_file(struct file *f, struct file_lock *l);
+static int unlock_file(struct file *f, struct file_lock *l);
 
 static struct connection *reap_closed(void);
 static void *destroy_connection(struct connection *c);
@@ -26,6 +40,21 @@ struct sym_import sym_imports[] = {
 	 .addr = 0UL},
 };
 
+
+/******************************************************************************/
+/**
+ * @brief: import private symbols from the linux kernel
+ *
+ * @param[in]  imports - pointer to array of struct sym_imports
+ * @param[in]  size - number of elements in imports
+ * @returns    zero if all the symbols were imported, -ENFILE if at least
+ *             one of the symbols was not imported.
+ *
+ * @note: before being callable, each imported symbol needs a function pointer
+ *        initialized to the addr element.
+ *
+ ******************************************************************************/
+
 static int import_symbols(struct sym_import *imports, int size)
 {
 	for (int i = 0; i < size; i++) {
@@ -37,10 +66,28 @@ static int import_symbols(struct sym_import *imports, int size)
 	return 0;
 }
 
+/******************************************************************************/
+/**
+ * @brief: find the address of a specific private symbol that has previously
+ *         been imported into the struct sym_import array.
+ *
+ * @param[in]  imports - pointer to array of struct sym_imports
+ * @param[in]  name - the name of the symbol to find
+ * @param[in]  size - the number of array elements to search
+ * @returns    address of symbol of found, 0 if not found,
+ *             -EINVAL if invalid input
+ *
+ ******************************************************************************/
+
 static uint64_t find_private(struct sym_import *imports,
 			    const char *name,
 			    int size)
 {
+	if (imports == NULL ||
+	    (sizeof(*imports) / sizeof(struct sym_import) < size)) {
+		return -EINVAL;
+	}
+
 	for (int i = 0; i < size; i++) {
 		if (! strncmp(name, imports[i].name, KSYM_NAME_LEN - 1)) {
 			return imports[i].addr;
@@ -48,6 +95,18 @@ static uint64_t find_private(struct sym_import *imports,
 	}
 	return 0;
 }
+
+/******************************************************************************/
+/**
+ * @brief: use a request message to initialize a reply message
+ *
+ * @param[in]     req - pointer to an initialized request message
+ * @param[in,out] rep - pointer to a reply message
+ * @returns void
+ *
+ * @note: essentially a structure copy with msg_type set to REPLY
+ *
+ ******************************************************************************/
 
 static void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
@@ -66,6 +125,20 @@ static void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 	return;
 }
 
+/******************************************************************************/
+/**
+ * @brief: handle an invalid message
+ *
+ * @param[in]      req - pointer to an initialized request message
+ * @param[in, out] rep - pointer to a reply message
+ * @returns zero for success
+ *
+ * @note: If a message has a valid header, but an invalid type, it will get
+ *        handled here. The reply will have a result code of EINVAL, and
+ *        will be sent to the client.
+ *
+ ******************************************************************************/
+
 static int handle_invalid(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
@@ -73,12 +146,42 @@ static int handle_invalid(struct hotplug_msg *req, struct hotplug_msg *rep)
 	return 0;
 }
 
+
+/******************************************************************************/
+/**
+ * @brief: handle a DISCOVER request
+ *
+ * @param[in]      req - pointer to an initialized DISCOVER request
+ * @param[in, out] rep - pointer to a reply message
+ * @returns zero for success
+ *
+ * @note: the DISCOVER message is the way for a client or driver to get basic
+ *        information about the server or device, as well as to confirm
+ *        the message medium is functional.
+ *
+ ******************************************************************************/
+
 static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
 	rep->result = OK;
 	return 0;
 }
+
+
+/******************************************************************************/
+/**
+ * @brief: handle an UNPLUG request
+ *
+ * @param[in]      req - pointer to an initialized UNPLUG message
+ * @param[in, out] rep - pointer to a reply message
+ * @returns zero for success.
+ *
+ * @note: Causes the server or device to unplug a cpu. The reply message will contain
+ *        a result of OK if the cpu was unplugged,  _EBUSY, _EPERM, or _EINVAL
+ *        if the unplug action is not successful.
+ *
+ ******************************************************************************/
 
 int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
@@ -110,6 +213,21 @@ int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 	}
 	return 0;
 }
+
+
+/******************************************************************************/
+/**
+ * @brief: handle a PLUG request
+ *
+ * @param[in]      req - pointer to an initialized PLUG message
+ * @param[in, out] rep - pointer to a reply message
+ * @returns zero for success.
+ *
+ * @note: Causes the server or device to plug in a cpu. The reply message will contain
+ *        a result of OK if the cpu was plugged in,  _EBUSY, _EPERM, or _EINVAL
+ *        if the plug action is not successful.
+ *
+ ******************************************************************************/
 
 int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
@@ -143,18 +261,18 @@ int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 	return 0;
 }
 
+/******************************************************************************/
 /**
- * see linux/include/linux/cpu.h
- * These states are not related to the core CPU hotplug mechanism. They are
- * used by various (sub)architectures to track internal state
- **/
-#define CPU_ONLINE		0x0002 /* CPU is up */
-#define CPU_UP_PREPARE		0x0003 /* CPU coming up */
-#define CPU_DEAD		0x0007 /* CPU dead */
-#define CPU_DEAD_FROZEN		0x0008 /* CPU timed out on unplug */
-#define CPU_POST_DEAD		0x0009 /* CPU successfully unplugged */
-#define CPU_BROKEN		0x000B /* CPU did not die properly */
-
+ * @brief: handle a GET_BOOT_STATE request
+ *
+ * @param[in]      req - pointer to an initialized GET_BOOT_STATE message
+ * @param[in, out] rep - pointer to a reply message
+ * @returns zero for success.
+ *
+ * @note: retrieves the functional (not hot-plug) state of the cpu:
+ *        online, preparing, dead, frozen, post dead, broken
+ *
+ ******************************************************************************/
 
 int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
@@ -163,6 +281,20 @@ int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 	return 0;
 }
 
+/******************************************************************************/
+/**
+ * @brief: handle a GET_CURRENT_STATE request
+ *
+ * @param[in]      req - pointer to an initialized GET_CURRENT_STATE message
+ * @param[in, out] rep - pointer to a reply message
+ * @returns zero for success.
+ *
+ * @note: retrieves the current hot-plug state of a cpu. This will be one the
+ *        states enumerated in <linux/cpuhotplug.h>
+ *
+ *        (Reads the sysfs state file.)
+ *
+ ******************************************************************************/
 
 int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
@@ -191,6 +323,22 @@ int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 	}
 	return 0;
 }
+
+/******************************************************************************/
+/**
+ * @brief: handle a SET_TARGET_STATE request
+ *
+ * @param[in]      req - pointer to an initialized SET_TARGET_STATE message
+ * @param[in, out] rep - pointer to a reply message
+ * @returns zero for success.
+ *
+ * @note: writes a new target state value for the cpu. This will be one the
+ *        states enumerated in <linux/cpuhotplug.h>.
+ *
+ *        This will cause a state transition to occur. For example writing '0'
+ *        will unplug the cpu. (writes to the sysfs target file.)
+ *
+ ******************************************************************************/
 
 int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
@@ -229,7 +377,7 @@ dispatch_t dispatch_table[] = {
 };
 
 /**
- * @brief: called with interrupts disabled, no blocking
+ * @brief: callback prior to cpu coming online
  **/
 static int my_cpu_online(unsigned int cpu)
 {
@@ -238,7 +386,7 @@ static int my_cpu_online(unsigned int cpu)
 }
 
 /**
- * @brief: called with interrupts disabled, no blocking
+ * @brief: callback prior to cpu going offline
  **/
 static int my_cpu_going_offline(unsigned int cpu)
 {
@@ -246,13 +394,22 @@ static int my_cpu_going_offline(unsigned int cpu)
 	return ccode;
 }
 
+/******************************************************************************/
 /**
- * check magic
- * validate cpu number
- * validate action
- * perform action
- * return zero or error code
- **/
+ * @brief: parse an incoming hotplug message, dispatch the message,
+ *         initialize the reply
+ *
+ * @param[in]      request - pointer to the request message
+ * @param[in, out] response - pointer to a response structure
+ * @returns OK upon success, negative otherwise
+ *
+ * @note: checks the message header for a magic number, major version
+ *        and supported action before calling into the dispatch table.
+ *        The dispatch table will call the message handler and return
+ *        an initialized response.
+ *
+ ******************************************************************************/
+
 int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 {
 	if (!request || !response) {
@@ -275,11 +432,18 @@ int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 	return -EINVAL;
 }
 
+/******************************************************************************/
 /**
- * sock refers to struct socket,
- * sk refers to struct sock
- * http://haifux.org/hebrew/lectures/217/netLec5.pdf
- **/
+ * @brief: read from a kernel socket
+ *
+ * @param[in] sock - pointer to a struct socket
+ * @param[in] size - the number of bytes to attempt to read
+ * @param[in] in - pointer to buffer which will receive the bytes
+ * @param[in] flags kernel flags, zero in this module
+ * @returns number of bytes read, or negative upon error
+ *
+ ******************************************************************************/
+
 size_t k_socket_read(struct socket *sock,
                      size_t size,
                      void *in,
@@ -297,6 +461,21 @@ again:
 	return res;
 }
 
+
+/******************************************************************************/
+/**
+ * @brief: allocate a buffer and read bytes from a socket into the buffer,
+ *         return the allocated buffer filled with bytes read from the socket.
+ *
+ * @param[in]      sock - pointer to a struct socket
+ * @param[in]      max_size - the amount of memory to allocate for the buffer, and
+ *                 the maximum number of bytes to read into the buffer.
+ * @param[in, out] actual_size - the number of bytes read into the buffer.
+ * @returns pointer to the allocated buffer containing read bytes, or NULL
+ *
+ * @note:
+ *
+ ******************************************************************************/
 
 void *read_alloc_buf(struct socket *sock,
                      size_t max_size,
@@ -345,6 +524,20 @@ void *read_alloc_buf(struct socket *sock,
 	return buf;
 }
 
+/******************************************************************************/
+/**
+ * @brief: Write a buffer to a connected socket
+ *
+ * @param[in] socket - pointer to a struct socket
+ * @param[in] size - the number of bytes to write
+ * @param[in] out - buffer containing bytes to write
+ * @param[in] flags - always zero in this module
+ * @returns the number of bytes written
+ *
+ * @note:
+ *
+ ******************************************************************************/
+
 size_t k_socket_write(struct socket *sock,
                       size_t size,
                       void *out,
@@ -365,6 +558,18 @@ again:
 	}
 	return res;
 }
+
+/******************************************************************************/
+/**
+ * @brief: kernel thread that accepts new connections.
+ *
+ * @param[in] work - pointer to a struct kthread_work
+ * @returns void
+ *
+ * @note: for each new connection, calls a function that spawns that connection
+ *        as a new kernel thread.
+ *
+ ******************************************************************************/
 
 static void k_accept(struct kthread_work *work)
 {
@@ -435,6 +640,18 @@ close_out_quit:
 	return;
 }
 
+
+/******************************************************************************/
+/**
+ * @brief: creates a socket, binds it, and listens for new connections with it
+ *
+ * @param[in] c - pointer to a struct connection
+ * @returns OK (0) or -ENFILE
+ *
+ * @note:
+ *
+ ******************************************************************************/
+
 static int start_listener(struct connection *c)
 {
 	struct sockaddr_un addr = {.sun_family = AF_UNIX};
@@ -461,7 +678,7 @@ static int start_listener(struct connection *c)
 		goto err_release;
 
 	}
-/* see /usr/include/net/tcp_states.h */
+        /* see /usr/include/net/tcp_states.h */
 	if (kernel_listen(sock, TCP_LISTEN)) {
 		printk(KERN_DEBUG "%s: %s %u error socket listening\n",
 		       __FILE__, __FUNCTION__, __LINE__);
@@ -469,7 +686,7 @@ static int start_listener(struct connection *c)
 		goto err_release;
 	}
 
-	return 0;
+	return OK;
 err_release:
 	sock_release(sock);
 err_exit:
@@ -478,6 +695,19 @@ err_exit:
 	       __FILE__, __FUNCTION__, __LINE__);
 	return -ENFILE;
 }
+
+/******************************************************************************/
+/**
+ * @brief: links an initialized connection to the global list, sets flags to
+ *         indicate that the connection has work for a kernel thread.
+ *
+ * @param[in] c - pointer to an initialized struct connection
+ * @param[in] l - pointer to struct list_head
+ * @returns void
+ *
+ * @note: connection is linked into the list head
+ *
+ ******************************************************************************/
 
 static void link_new_connection_work(struct connection *c,
                                      struct list_head *l)
@@ -495,6 +725,19 @@ static void link_new_connection_work(struct connection *c,
  * tear down the connection but don't free the connection
  * memory. do free resources, struct sock.
  **/
+/******************************************************************************/
+/**
+ * @brief: stops and frees the resources used by the connection, including
+ *         kernel thread and socket, zeroes connection memory.
+ *
+ * @param[in] c - pointer to a struct connection
+ * @returns a pointer to the zeroed connection memory
+ *
+ * @note: does not free the struct connection; this allows it to work with both
+ *        statically and heap-allocated struct connections.
+ *
+ ******************************************************************************/
+
 static void *destroy_connection(struct connection *c)
 {
 	if (down_interruptible(&c->s_lock))
@@ -516,8 +759,20 @@ static void *destroy_connection(struct connection *c)
 }
 
 /**
- * must be called with connections_lock held
+
  **/
+/******************************************************************************/
+/**
+ * @brief: traverse the connection list looking for closed connections. If found,
+ *         unlink and return the connection for recycling or destruction.
+ *
+ * @param[in] void
+ * @returns pointer to a recycled struct connection, or NULL
+ *
+ * @note: must be called with connections_lock held
+ *
+ ******************************************************************************/
+
 static struct connection *reap_closed(void)
 {
 	struct connection *cursor;
@@ -531,6 +786,17 @@ static struct connection *reap_closed(void)
 	return NULL;
 }
 
+
+/******************************************************************************/
+/**
+ * @brief: reap and destroy closed connections
+ *
+ * @param[in] void
+ * @returns the number of connections reaped and destroyed
+ *
+ * @note:
+ *
+ ******************************************************************************/
 
 static int __attribute__((used)) reap_and_destroy(void)
 {
@@ -548,12 +814,20 @@ static int __attribute__((used)) reap_and_destroy(void)
 	return count;
 }
 
-
+/******************************************************************************/
 /**
- * dispatched from a kernel thread, has a connected socket
- * read and write cpu hotplug messages. If encountering an error, close the socket.
- * if no error, re-schedule the kernel thread to run again.
- **/
+ * @brief: kernel thread that reads, parses, and writes hotplug messages
+ *
+ * @param[in] work - pointer to struct kthread_work, which is embedded within
+ *            a struct connection
+ * @returns void
+ *
+ * @note: each new connection spawns a thread running this server. The threads
+ *        runs until the client closes the connection, stops responding,
+ *        or sends an invalid message.
+ *
+ ******************************************************************************/
+
 static void k_msg_server(struct kthread_work *work)
 {
 	int ccode = 0;
@@ -643,11 +917,26 @@ close_out:
 	return;
 }
 
+/******************************************************************************/
 /**
- * return a newly initialized connnection struct,
- * socket will either be bound and listening, or
- * accepted and connected, according to flags
- **/
+ * @brief: initializes a new connection. connections are either (1) listening
+ *         and accpeting new connections, or (2) a new accepted connection with
+ *         a connected socket.
+ *
+ * @param[in] c - pointer to a new connection
+ * @param[in] flags - must be SOCK_LISTEN or SOCK_CONNECTED, but not both
+ * @param[in] p - pointer to either a string with the name of the listening
+ *            socket, or a pointer to a connected socket, depending upon the
+ *            flags.
+ * @returns pointer to a struct connection, or ERR_PTR(-ENOMEM | -ENFILE | ccode)
+ *
+ * @note: void *p always identifies the socket element. If the SOCK_LISTEN flag
+ *        is set, (char *)p is the name of the file the socket will be bound to.
+ *        If the SOCK_CONNECTED flag is set, (struct socket *)p is a connected
+ *        socket created by a call to accept().
+ *
+ ******************************************************************************/
+
 struct connection *init_connection(struct connection *c, uint64_t flags, void *p)
 {
 	int ccode = 0;
@@ -668,8 +957,6 @@ struct connection *init_connection(struct connection *c, uint64_t flags, void *p
  **/
 	c->flags = flags;
 	if (__FLAG_IS_SET(c->flags, SOCK_LISTEN)) {
-
-
 		/**
 		 * p is a pointer to a string holding the socket name
 		 **/
@@ -727,7 +1014,18 @@ err_exit:
 	return ERR_PTR(ccode);
 }
 
-static void __attribute__((used)) awaken_accept_thread(void)
+/******************************************************************************/
+/**
+ * @brief: break the listening kernel thread out of its polling loop
+ *
+ * @param[in] void
+ * @returns void
+ *
+ * @note: This is a hack, should be replaced by a signal.
+ *
+ ******************************************************************************/
+
+static void awaken_accept_thread(void)
 {
 	struct sockaddr_un addr;
 	struct socket *sock = NULL;
@@ -762,14 +1060,74 @@ static void __attribute__((used)) awaken_accept_thread(void)
 	return;
 }
 
+
+static int unlock_file(struct file *f, struct file_lock *l)
+{
+	if (!f || !l) {
+		return -EINVAL;
+	}
+
+	return vfs_cancel_lock(f, l);
+}
+
+static int lock_file(struct file *f, struct file_lock *l)
+{
+	if (!f || !l) {
+		return -EINVAL;
+	}
+
+	l->fl_flags = FL_FLOCK;
+	l->fl_type  = F_WRLCK;
+
+	/**
+	 * POSIX protocol says this lock will be released if the module
+	 * crashes or exits
+	 **/
+	return vfs_lock_file(f, F_SETLK, l, NULL);
+}
+
+static int close_lock_file(struct file *f)
+{
+	if (!f) {
+		return -EINVAL;
+	}
+
+	return filp_close(f, NULL);
+}
+
+static struct file *open_lock_file(char *lock_name)
+{
+	struct file *lock_file = NULL;
+	if (! lock_name) {
+		return ERR_PTR(-EINVAL);
+	}
+	/**
+	 * open the lock file, create it if necessary
+	 **/
+	lock_file = filp_open(lock_name, O_RDONLY | O_CREAT, S_IRUSR | S_IWUSR);
+	if (IS_ERR(lock_file) || ! lock_file) {
+		printk(KERN_DEBUG "error opening or creating the socket lock\n");
+		return ERR_PTR(-ENFILE);
+	}
+	return lock_file;
+}
+
+
+/******************************************************************************/
+/**
+ * @brief: remove the file representing the listening domain socket
+ *
+ * @param[in] pointer to the name of the socket file
+ * @param[in] pointer to the name of the lock file
+ * @returns OK (0) or non-negative error number
+ *
+ * @note: The lock file protects
+ *
+ ******************************************************************************/
+
 static int unlink_sock_name(char *sock_name, char *lock_name)
 {
 	struct path name_path = {.mnt = 0};
-	struct file *lock_file = NULL;
-	struct file_lock l = {
-		.fl_flags = FL_FLOCK,
-		.fl_type = F_WRLCK,
-	};
 	int need_lock = 0;
 	int ccode = kern_path(sock_name, LOOKUP_FOLLOW, &name_path);
 	if (ccode) {
@@ -785,29 +1143,18 @@ static int unlink_sock_name(char *sock_name, char *lock_name)
 	}
 
 	if (lock_name) {
-		/**
-		 * open the lock file, create it if necessary
-		 **/
-		lock_file = filp_open(lock_name, O_RDONLY | O_CREAT, S_IRUSR | S_IWUSR);
-		if (IS_ERR(lock_file) || ! lock_file) {
-			printk(KERN_DEBUG "error opening or creating the socket lock\n");
-			ccode = -ENFILE;
-			goto exit;
+		if (f_lock_file == NULL) {
+			f_lock_file = open_lock_file(lock_name);
 		}
-
-		/**
-		 * POSIX protocol says this lock will be released if the module
-		 * crashes or exits
-		 **/
-		need_lock = vfs_lock_file(lock_file, F_SETLK, &l, NULL);
+		need_lock = lock_file(f_lock_file, &f_lock);
 	}
 
 	if (!need_lock && !ccode) {
 		ccode = vfs_unlink(name_path.dentry->d_parent->d_inode,
 				   name_path.dentry,
 				   NULL);
+		unlock_file(f_lock_file, &f_lock);
 	}
-exit:
 	return ccode;
 }
 
@@ -1041,17 +1388,20 @@ void __exit socket_interface_exit(void)
 	unlink_sock_name(socket_name, lockfile_name);
 	spin_lock(&connections_lock);
 
-  c = list_first_entry_or_null(&connections, struct connection, l);
+	c = list_first_entry_or_null(&connections, struct connection, l);
 	while (c != NULL) {
 		list_del(&c->l);
-    spin_unlock(&connections_lock);
+		spin_unlock(&connections_lock);
 		destroy_connection(c);
 		kzfree(c);
-    spin_lock(&connections_lock);
+		spin_lock(&connections_lock);
 		c = list_first_entry_or_null(&connections, struct connection, l);
 	}
 	spin_unlock(&connections_lock);
-
+	if (f_lock_file != NULL) {
+		close_lock_file(f_lock_file);
+		f_lock_file = NULL;
+	}
 	unlink_file(lockfile_name);
 	return;
 }
