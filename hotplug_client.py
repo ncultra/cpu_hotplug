@@ -13,6 +13,15 @@ class ParserError(Exception):
 
 class HotPlug:
     def __init__(self, args):
+        """Initialize the HotPlug object.
+
+        Arguments determine whether the object is a client or server, and the
+        name of the Unix domain socket file. Server mode is active when the
+        --listen argument is present.
+
+        The remainder of the initialization involves message header variables
+        and Dictionaries for message types, actions, and errors.
+        """
         self.args = args
         self.sock = 0
         if self.args.socket:
@@ -29,13 +38,23 @@ class HotPlug:
         self.PROTOCOL_VERSION = 0x00000100
         self.prot_ver = pack('!L', self.PROTOCOL_VERSION)
         self.msg_types = {'EMPTY': 0, 'REQUEST': 1, 'REPLY': 2, 'COMPLETE': 3}
-        self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3, 'GET_BOOT_STATE': 4, 'GET_CURRENT_STATE': 5,
+        self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3,
+                            'GET_BOOT_STATE': 4, 'GET_CURRENT_STATE': 5,
                             'SET_TARGET_STATE': 6, 'LAST': 7}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8,
                        'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11}
 
     def server(self):
+        """Listen for socket connections and respond to hotplug messages.
+
+        Server mode is activated by passing the --listen parameter on the command line
+        when run in command line mode.
+
+        Creates a Unix domain socket, binds the socket to self.sock_name, and listens
+        for connections. For each connection, calls accept to create a new socket,
+        and enters a send-receive loop using that socket.
+        """
         try:
             os.remove(self.sock_name)
         except:
@@ -68,6 +87,13 @@ class HotPlug:
                 sys.exit(1)
 
     def server_rcv_send(self, _sock):
+        """Server send/receive loop.
+
+        Reads and requests dispatches, sends replies. When the client stops sending
+        messages, exit the loop.
+
+        Messages are in binary format, and must be unpacked into a Dictionary.
+        """
         while True:
             buf = self.read_raw_message(_sock)
             if len(buf) == 0:
@@ -78,6 +104,13 @@ class HotPlug:
             self.dispatch_request(msg, _sock)
 
     def client(self):
+        """
+        Client mode of the HotPlug object. Sends requests and reads responses.
+
+        Forms request messages as Dictionaries and packs them into binary format for
+        transmission. Receives response messages in binary format and unpacks them into
+        Dictionaries.
+        """
         try:
             self.sock_connect(self.sock_name)
         except OSError:
@@ -128,6 +161,11 @@ class HotPlug:
         self.print_unpacked_message(response)
 
     def sock_connect(self, sock_name):
+        """Connect to the server's listening Unix domian socket.
+
+        @param[in] sock_name - the name of the listening socket
+        @returns   socket connected to the server, or throws an OSError
+        """
         print("Connecting to {}".format(sock_name))
         try:
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -138,7 +176,11 @@ class HotPlug:
         return self.sock
 
     def pack_message(self, msg_dict):
-        """ msg_dict is a dictionary """
+        """Packs a Dictionary containing message fields into a binary structure.
+
+        @param[in] msg_dict - Dictionary containing message fields
+        @returns   a packed structure containing the message fields
+        """
         msg = bytearray(288)
         pack_into('=L', msg, 0, self.CONNECTION_MAGIC)
         pack_into('!L', msg, 4, self.PROTOCOL_VERSION)
@@ -164,11 +206,23 @@ class HotPlug:
         return msg
 
     def print_packed_message(self, msg):
+        """Print a packed structure containing message fields.
+
+        """
         print("{} {}", msg, len(msg))
 
     def print_unpacked_message(self, msg):
+        """Print an unpacked Dictionary containing message fields.
+
+        """
         print(msg)
     def write_packed_message(self, _sock, msg):
+        """Write a packed structure containing message fields to a connected socket.
+
+        @param[in] _sock - connected socket
+        @param[in] msg - packed structure containing message bytes
+
+        """
         try:
             print("sending {} bytes".format(len(msg)))
             _sock.sendall(msg)
@@ -176,6 +230,11 @@ class HotPlug:
             print("Error writing packed message field to socket")
 
     def read_raw_message(self, _sock):
+        """Read bytes from a connected socket into packed structure.
+
+        @param[in] _sock - connected socket
+        @returns   structure of  bytes containing message fields
+        """
         try:
             buf = _sock.recv(288)
             print("Read {} bytes".format(len(buf)))
@@ -185,7 +244,11 @@ class HotPlug:
 
 
     def unpack_raw_message(self, msg):
-        """returns a dictionary with message fields"""
+        """Turns a packed structure into a dictionary with message fields
+
+        @param[in] msg - a structure containing packed bytes.
+        @returns   a Dictionary containing message fields.
+        """
         magic = unpack_from('=L', msg, 0)
         version = unpack_from('!L', msg, 4)
         msg_type = unpack_from('=L', msg, 8)
@@ -212,19 +275,38 @@ class HotPlug:
                 'active_mask': cpu_active_mask}
 
     def check_magic(self, magic):
+        """Compare the magic number field of a message to its defined value.
+
+        @param[in] magic - a magic number that must be the first element of any
+                   hotplug message
+        @returns True if the number is correct, False otherwise.
+        """
         if magic == self.CONNECTION_MAGIC:
             return True
         else:
             return False
 
     def check_version(self, version):
+        """Compare the major version of a message with the server's major version.
+
+	@param[in] version - the major version, which defines compatibility
+	@returns True if the version matches the server, False otherwise
+	"""
         if version == self.PROTOCOL_VERSION:
             return True
         else:
             return False
 
     def dispatch_request(self, request, _sock):
-        """request is a dictionary containing unpacked message fields"""
+        """Parses an unpacked Dictionary containing a message, dispatches it to
+        the correct handler.
+
+	@param[in] request - a Dictionary containing message elements.
+        @param[in] _sock - a connected socket, which will be passed to the message handler.
+	@raises ParserError NOT_HANDLED if the message is deemed to be incorrect.
+
+        @note: this is a server method
+	"""
         # first check the header and type
         if False == self.check_magic(request['magic']):
             raise ParserError("Bad message header", self.errors['EINVAL'])
@@ -264,6 +346,13 @@ class HotPlug:
         raise ParserError("Request message not handled", self.errors['NOT_HANDLED'])
 
     def client_send_rcv(self, msg_dict):
+        """Client send/receive method.
+
+	@param[in] msg_dict - a Dictionary containing message elements
+
+        @note: Client is assumed to already have a socket connected to the server.
+	"""
+
         msg = self.pack_message(msg_dict)
         self.write_packed_message(self.sock, msg)
         buf = self.read_raw_message(self.sock)
@@ -271,8 +360,13 @@ class HotPlug:
         self.print_unpacked_message(response)
 
     def send_unplug_request(self, msg_dict, cpu_list):
-        """msg_dict is a template for the request message,
-           cpu_list is a list of the cpus to be unplugged"""
+        """Sends an unplug request to the server for each CPU in the list
+
+	@param[in] msg_dict - Dictionary containing an unplug request message
+        @param[in] cpu_list - will send one message for each cpu in the list
+
+	@note: this is a Client method
+	"""
         for cpu in cpu_list:
             msg_dict['cpu'] = cpu
             msg_dict['action'] = self.msg_actions['UNPLUG']
@@ -281,6 +375,17 @@ class HotPlug:
         return
 
     def handle_unplug_request(self, msg_dict, _sock):
+        """Server handler for the unplug request (above).
+
+	@param[in] msg_dict - Dictionary containing an unplug message
+        @param[in] _sock - socket connected to the client
+
+        @note unplugs the cpu by writing to the cpu's sysfs 'online' file,
+        writes a response message with the appropriate status code to the
+        client socket.
+
+	@note this is a Server method
+	"""
         print("Received a request to unplug cpu {}".format(msg_dict['cpu']))
         path = '/sys/devices/system/cpu/cpu{}/online'.format(msg_dict['cpu'])
         print(path)
@@ -299,8 +404,15 @@ class HotPlug:
         return
 
     def send_plug_request(self, msg_dict, cpu_list):
-        """msg_dict is a template for the request message,
-           cpu_list is a list of the cpus to be unplugged"""
+        """Send a cpu plug-in request to the server.
+
+	@param[in] msg_dict - a Dictionary containing the cpu plug request
+        @param[in] cpu_list - a list of cpus for which to send this request
+
+	@note: this is a Client method. The client must have already have a socket
+        connected to the server. The client will send one request for each cpu
+        in the list.
+	"""
         for cpu in cpu_list:
             msg_dict['cpu'] = cpu
             msg_dict['action'] = self.msg_actions['PLUG']
@@ -309,6 +421,17 @@ class HotPlug:
         return
 
     def handle_plug_request(self, msg_dict, _sock):
+        """Server handler for the plug-in request (above).
+
+	@param[in] msg_dict - Dictionary containing a plug-in message
+        @param[in] _sock - socket connected to the client
+
+        @note plugs the cpu by writing to the cpu's sysfs 'online' file,
+        writes a response message with the appropriate status code to the
+        client socket.
+
+	@note this is a Server method
+	"""
         print("Received a request to plug in cpu {}".format(msg_dict['cpu']))
         path = '/sys/devices/system/cpu/cpu{}/online'.format(msg_dict['cpu'])
         print(path)
@@ -327,8 +450,18 @@ class HotPlug:
         return
 
     def send_get_boot_state_request(self, msg_dict, cpu_list):
-        """msg_dict is a template for the request message,
-           cpu_list is a list of the cpus to be unplugged"""
+        """Send a get boot state request to the server.
+
+	@param[in] msg_dict - a Dictionary containing the get boot state request
+        @param[in] cpu_list - a list of cpus for which to send this request
+
+	@note: this is a Client method. The client must have already have a socket
+        connected to the server. The client will send one request for each cpu
+        in the list.
+
+        @note: the boot state is not a hot-plug state, and this request is not handled
+        by the Python server.
+	"""
         msg_dict['action'] = self.msg_actions['GET_BOOT_STATE']
         for cpu in cpu_list:
             print("sending for cpu {}".format(cpu))
@@ -347,8 +480,17 @@ class HotPlug:
         return
 
     def send_get_current_state_request(self, msg_dict, cpu_list):
-        """msg_dict is a template for the request message,
-           cpu_list is a list of the cpus to be unplugged"""
+        """Send a get current state request to the server.
+
+	@param[in] msg_dict - a Dictionary containing the get boot state request
+        @param[in] cpu_list - a list of cpus for which to send this request
+
+	@note: this is a Client method. The client must have already have a socket
+        connected to the server. The client will send one request for each cpu
+        in the list.
+
+        @note: the current state a hot-plug state.
+	"""
         msg_dict['action'] = self.msg_actions['GET_CURRENT_STATE']
         for cpu in cpu_list:
             print("sending for cpu {}".format(cpu))
