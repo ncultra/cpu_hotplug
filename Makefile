@@ -24,13 +24,13 @@ super-clean: clean
 debug-modules: ccflags-y += ${DEBUG_CFLAGS}
 debug-modules: clean trim lint
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd)
-	$(shell find ./ -name "*.o" | xargs ~/bin/disasm.sh &>/dev/null)
+	find ./ -name "*.o" | xargs ~/bin/disasm.sh &>/dev/null
 
 modules: ccflags-y += ${PRODUCTION_CFLAGS}
 modules: clean trim lint
 modules:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd)
-	$(shell find ./ -name "*.o" | xargs ~/bin/disasm.sh &>/dev/null)
+	find ./ -name "*.o" | xargs ./disasm.sh &>/dev/null
 
 # note, for centos kernels built from centos source, make sure that
 # /usr/src/kernels/$(uname -r)/certs has the signing keys and associated files.
@@ -61,13 +61,13 @@ lint:
 
 .PHONY: trim
 trim:
-	$(shell find ./ -name "*.c" | xargs ~/bin/ttws.sh &>/dev/null)
-	$(shell find ./ -name "*.h" | xargs ~/bin/ttws.sh &>/dev/null)
-	$(shell find ./ -name "Makefile" | xargs ~/bin/ttws.sh &>/dev/null)
+	find ./ -name "*.c" | xargs ./ttws.sh &>/dev/null
+	find ./ -name "*.h" | xargs ./ttws.sh &>/dev/null
+	find ./ -name "Makefile" | xargs ./ttws.sh &>/dev/null
 
 .PHONY: disassemble
 disassemble:
-	find ./ -name "*.o" | xargs ~/bin/disasm.sh
+	find ./ -name "*.o" | xargs ./disasm.sh
 
 .PHONY: sign
 sign:

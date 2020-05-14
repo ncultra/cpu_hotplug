@@ -1061,6 +1061,18 @@ static void awaken_accept_thread(void)
 }
 
 
+/******************************************************************************/
+/**
+ * @brief: release a lock held in an open file
+ *
+ * @param[in] f - pointer to an open struct file
+ * @param[in] l - pointer to a struct file_lock
+ * @returns OK (0) upon success, non-zero otherwise
+ *
+ * @note:
+ *
+ ******************************************************************************/
+
 static int unlock_file(struct file *f, struct file_lock *l)
 {
 	if (!f || !l) {
@@ -1070,6 +1082,17 @@ static int unlock_file(struct file *f, struct file_lock *l)
 	return vfs_cancel_lock(f, l);
 }
 
+/******************************************************************************/
+/**
+ * @brief: obtain an exclusive lock a lock on an open file
+ *
+ * @param[in] f - pointer to an open struct file
+ * @param[in] l - pointer to a struct file_lock
+ * @returns OK (0) upon success, non-zero otherwise
+ *
+ * @note:
+ *
+ ******************************************************************************/
 static int lock_file(struct file *f, struct file_lock *l)
 {
 	if (!f || !l) {
@@ -1086,14 +1109,43 @@ static int lock_file(struct file *f, struct file_lock *l)
 	return vfs_lock_file(f, F_SETLK, l, NULL);
 }
 
+/******************************************************************************/
+/**
+ * @brief: close the lock file used to protect the domain socket
+ *
+ * @param[in] f - pointer to an open struct file
+ * @returns OK (0) upon success, non-zero otherwise
+ *
+ * @note: before unlinking the socket file, the module must gain an
+ *        exclusive lock on the lock file. a cooperative process holding
+ *        the lock will prevent unlinking the file prematurely.
+ *
+ ******************************************************************************/
+
 static int close_lock_file(struct file *f)
 {
 	if (!f) {
 		return -EINVAL;
 	}
+	if (!file_count(f)) {
+		return 0;
+	}
 
 	return filp_close(f, NULL);
 }
+
+/******************************************************************************/
+/**
+ * @brief: open the lock file, creating it if necessary
+ *
+ * @param[in] lock_name - string containing the name of the lock file
+ * @returns a pointer to the opened struct file if successful, an error
+ *          cast as a pointer upon failure.
+ *
+ * @note: The lock file can prevent another cooperative process from unlinking
+ *        the domain socket file prematurely
+ *
+ ******************************************************************************/
 
 static struct file *open_lock_file(char *lock_name)
 {
@@ -1153,10 +1205,20 @@ static int unlink_sock_name(char *sock_name, char *lock_name)
 		ccode = vfs_unlink(name_path.dentry->d_parent->d_inode,
 				   name_path.dentry,
 				   NULL);
-		unlock_file(f_lock_file, &f_lock);
 	}
 	return ccode;
 }
+
+/******************************************************************************/
+/**
+ * @brief: delete a file from the vfs
+ *
+ * @param[in] filename - pointer to a string with the file name
+ * @returns OK (0) upon success, non-zero otherwise.
+ *
+ * @note:
+ *
+ ******************************************************************************/
 
 int unlink_file(char *filename)
 {
@@ -1176,6 +1238,18 @@ int unlink_file(char *filename)
 	return ccode;
 }
 
+/******************************************************************************/
+/**
+ * @brief: retrieve file attributes
+ *
+ * @param[in]      f - pointer to an open struct file
+ * @param[in, out] k - pointer to a struct kstat
+ * @returns OK (0) upon success, non-zero otherwise
+ *
+ * @note:
+ *
+ ******************************************************************************/
+
 int file_getattr(struct file *f, struct kstat *k)
 {
 	int ccode = 0;
@@ -1183,6 +1257,20 @@ int file_getattr(struct file *f, struct kstat *k)
 	ccode = vfs_getattr(&f->f_path, k, 0x00000fffU, KSTAT_QUERY_FLAGS);
 	return ccode;
 }
+
+/******************************************************************************/
+/**
+ * @brief: open, write to, and close a file
+ *
+ * @param[in]      name - pointer to string containing the name of the file
+ * @param[in, out] buf -  pointer to a buffer which will contain bytes read
+ * @param[in]      count - the size of the buffer and the number of bytes to read
+ * @param[out]     pos - pointer to a long integer which indicates the offset
+ *                 from which to read, and provides the ending offset.
+ * @returns        the number of bytes read, or a negative error number
+ *
+ *
+ ******************************************************************************/
 
 size_t write_file(char *name, void *buf, size_t count, loff_t * pos)
 {
@@ -1201,6 +1289,22 @@ size_t write_file(char *name, void *buf, size_t count, loff_t * pos)
 	}
 	return ccode;
 }
+
+/******************************************************************************/
+/**
+ * @brief: allocate a buffer, open a file, read from the file into the buffer
+ *
+ * @param[in]      name - string containing the name of the file
+ * @param[in, out] buf - double pointer that will contain the allocated buffer
+ * @param[in]      max_count - maximum bytes to read from the file
+ * @param[in, out] pos - pointer to the offset in the file from which to read,
+ *                 updated to indicate the offset for the next read
+ * @returns         number of bytes read
+ *
+ * @note: this function is overkill for reading the target file, but we may need
+ *        to read longer files, such as the states file
+ *
+ ******************************************************************************/
 
 size_t read_file(char *name, void **buf, size_t max_count, loff_t *pos)
 {
@@ -1261,10 +1365,17 @@ out_err:
 }
 
 
+/******************************************************************************/
 /**
- * @brief: returns >= 0 upon success, < 0 upon error. Error will be one of
- *         -ENOMEM, -EBADF, -ERANGE
- **/
+ * @brief: read the hotplug state file for a single cpu
+ *
+ * @param[in] cpu - number of the cpu for which to read state
+ * @returns   hotplug state for the cpu, or error -ENOMEM, -EBADF, -ERANGE
+ *
+ * @note:
+ *
+ ******************************************************************************/
+
 static int32_t read_cpu_state_file(int cpu)
 {
 	int state = 0;
@@ -1296,6 +1407,19 @@ static int32_t read_cpu_state_file(int cpu)
 }
 
 
+/******************************************************************************/
+/**
+ * @brief: initiate a state change for a specific cpu by writing to it's target
+ *         state file
+ *
+ * @param[in] cpu - the number of the target cpu
+ * @param[in] target - the desired state of the cpu
+ * @returns bytes written upon success, < 0 upon error.
+ *
+ * @note:
+ *
+ ******************************************************************************/
+
 static int write_cpu_target_file(int cpu, int target)
 {
 	int ccode = 0;
@@ -1319,6 +1443,15 @@ static int write_cpu_target_file(int cpu, int target)
 	return ccode;
 }
 
+/******************************************************************************/
+/**
+ * @brief: hook cpu hotplug state transitions
+ *
+ * @returns dynamic state number assigned to this module
+ *
+ * @note: called upon initialization
+ *
+ ******************************************************************************/
 
 static int cpu_hotplug_init(void)
 {
@@ -1328,15 +1461,34 @@ static int cpu_hotplug_init(void)
 					  my_cpu_online,
 					  my_cpu_going_offline);
 
-	return 0;
+	return ccode;
 }
 
+/******************************************************************************/
+/**
+ * @brief: un-hook this module from cpu hotplug state transitions
+ *
+ * @returns void
+ *
+ * @note: called upon module unload
+ *
+ ******************************************************************************/
 
 static void cpu_hotplug_cleanup(void)
 {
 	cpuhp_remove_state_nocalls(CPUHP_AP_ONLINE_DYN);
 }
 
+
+/******************************************************************************/
+/**
+ * @brief: module initialization
+ *
+ * @returns OK (0) upon success, -ENFILE or -ENOMEM upon failure
+ *
+ * @note:
+ *
+ ******************************************************************************/
 
 int __init socket_interface_init(void)
 {
@@ -1370,11 +1522,14 @@ int __init socket_interface_init(void)
 
 
 
+/******************************************************************************/
 /**
- * the __exit routine is called with preemption disabled and will crash if it makes any
- * calls capable of sleeping. There is more we should do here, but unloading is mostly
- * useful for the development phase.
- **/
+ * @brief: clean-up module upon unloading
+ *
+ * @note:
+ *
+ ******************************************************************************/
+
 void __exit socket_interface_exit(void)
 {
 	struct connection *c = NULL;
@@ -1385,6 +1540,8 @@ void __exit socket_interface_exit(void)
 	/**
 	 * go through list of connections, destroy each connection
 	 **/
+	unlock_file(f_lock_file, &f_lock);
+	close_lock_file(f_lock_file);
 	unlink_sock_name(socket_name, lockfile_name);
 	spin_lock(&connections_lock);
 
@@ -1398,10 +1555,6 @@ void __exit socket_interface_exit(void)
 		c = list_first_entry_or_null(&connections, struct connection, l);
 	}
 	spin_unlock(&connections_lock);
-	if (f_lock_file != NULL) {
-		close_lock_file(f_lock_file);
-		f_lock_file = NULL;
-	}
 	unlink_file(lockfile_name);
 	return;
 }
