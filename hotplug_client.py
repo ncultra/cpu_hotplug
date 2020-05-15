@@ -500,6 +500,17 @@ class HotPlug:
         return
 
     def handle_get_current_state(self, msg_dict, _sock):
+        """Server handler for the get current state request (above).
+
+	@param[in] msg_dict - Dictionary containing a plug-in message
+        @param[in] _sock - socket connected to the client
+
+        @note retrieves the current hot plug state for the cpu by reading the cpu's
+        sysfs 'state' file, then writes a response message with the appropriate status
+        code to the client socket.
+
+	@note: this is a Server method
+	"""
         print("Received a request to get the current state of cpu {}".format(msg_dict['cpu']))
         msg_dict['msg_type'] = self.msg_types['REPLY']
         try:
@@ -512,8 +523,18 @@ class HotPlug:
         return
 
     def send_set_target_state_request(self, msg_dict, cpu_list, target):
-        """msg_dict is a template for the request message,
-           cpu_list is a list of the cpus to be unplugged"""
+        """Send a set target state request to the server.
+
+	@param[in] msg_dict - a Dictionary containing the get boot state request
+        @param[in] cpu_list - a list of cpus for which to send this request
+        @param[in] target - the new target hot plug state for the cpu
+
+	@note: this is a Client method. The client must have already have a socket
+        connected to the server. The client will send one request for each cpu
+        in the list.
+
+        @note: a side effect of this  request will change the current hot plug state.
+	"""
         msg_dict['action'] = self.msg_actions['SET_TARGET_STATE']
         msg_dict['target_state'] = target[0]
         for cpu in cpu_list:
@@ -524,6 +545,18 @@ class HotPlug:
         return
 
     def handle_set_target_state(self, msg_dict, _sock):
+        """Server handler for the set target state request (above).
+
+	@param[in] msg_dict - Dictionary containing a plug-in message
+        @param[in] _sock - socket connected to the client
+
+        @note sets the target hot plug state for the cpu by writing to the cpu's
+        sysfs 'target' file, then writes a response message with the appropriate status
+        code to the client socket.
+
+	@note: this is a Server method
+        @note: a side effect of handling this request changes the current hot plug state
+	"""
         print("Received a request to set target state {} for cpu {}".format(msg_dict['target_state'],
                                                                             msg_dict['cpu']))
         msg_dict['msg_type'] = self.msg_types['REPLY']
@@ -538,6 +571,13 @@ class HotPlug:
         return
 
     def get_current_state(self, cpu):
+        """Reads the cpu's hotplug state file.
+
+	@param[in] cpu - the index of the cpu
+	@returns   the current hot plug state of the cpu
+
+        @note: raises an IOError upon failure
+	"""
         path = '/sys/devices/system/cpu/cpu{}/hotplug/state'.format(cpu)
         print(path)
         current_state = None
@@ -552,6 +592,14 @@ class HotPlug:
         return current_state
 
     def set_target_state(self, cpu, target_state):
+        """writes to the cpu's hotplug target file.
+
+	@param[in] cpu - the index of the cpu
+	@param[in] target - the new target state
+	@returns   the new target state of the cpu
+
+        @note: raises an IOError upon failure
+	"""
         path = '/sys/devices/system/cpu/cpu{}/hotplug/target'.format(cpu)
         print(path)
         try:
@@ -564,6 +612,15 @@ class HotPlug:
             print(IOError)
             raise IOError
         return target_state
+
+
+def check_args(args, parser):
+    if args['listen'] == False and args['discover'] == False and args['get_boot_state'] == False and \
+       args['get_state'] == False and args['plug'] == False and args['set_target'] == None and \
+       args['unplug'] == False:
+       parser.print_help()
+       return False
+
 
 
 def hotplug_main(args):
@@ -581,7 +638,8 @@ def hotplug_main(args):
     parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')
 
     args = parser.parse_args()
-    print(args)
+    if check_args(vars(args), parser) == False:
+        return
 
     hotplug = HotPlug(args)
     if args.listen:
@@ -593,13 +651,11 @@ def hotplug_main(args):
             os.remove(hotplug.sock_name)
             sys.exit(0)
 
-
     else:
         try:
             hotplug.client()
         except ParserError:
             parser.print_help()
-
 
 
 if __name__ == "__main__":
