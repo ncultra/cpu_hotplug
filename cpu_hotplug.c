@@ -3,7 +3,7 @@
 atomic64_t SHOULD_SHUTDOWN = ATOMIC64_INIT(0);
 
 DEFINE_SPINLOCK(connections_lock);
-
+DEFINE_SPINLOCK(bitmap_lock);
 struct list_head connections;
 
 struct connection *listener = NULL;
@@ -32,6 +32,7 @@ static struct connection *reap_closed(void);
 static void *destroy_connection(struct connection *c);
 static int32_t  read_cpu_state_file(int cpu);
 static int write_cpu_target_file(int cpu, int target);
+static int __attribute__((used)) copy_cpu_bitmask(struct cpumask *dst, struct cpumask *src);
 
 int (*_cpu_report_state)(int) = NULL;
 
@@ -183,7 +184,7 @@ static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
  *
  ******************************************************************************/
 
-int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
+static int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	int ccode = OK;
 	init_reply(req, rep);
@@ -229,7 +230,7 @@ int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
  *
  ******************************************************************************/
 
-int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
+static int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	int ccode = OK;
 
@@ -274,7 +275,7 @@ int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
  *
  ******************************************************************************/
 
-int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *rep)
+static int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	init_reply(req, rep);
 	rep->current_state = (uint32_t)_cpu_report_state(req->cpu);
@@ -296,7 +297,7 @@ int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *rep)
  *
  ******************************************************************************/
 
-int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
+static int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	int32_t ccode = 0;
 	init_reply(req, rep);
@@ -340,7 +341,7 @@ int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
  *
  ******************************************************************************/
 
-int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *rep)
+static int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	int ccode = 0;
 
@@ -365,6 +366,48 @@ int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 	return 0;
 }
 
+static int handle_get_cpu_bitmasks(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	int ccode = OK;
+	unsigned long flags = 0UL;
+	struct cpumask *dst = NULL, *src = NULL;
+
+	init_reply(req, rep);
+	spin_lock_irqsave(&bitmap_lock, flags);
+	dst = (struct cpumask *)rep->possible_mask;
+	src = (struct cpumask *)&__cpu_possible_mask;
+
+	/**
+	 * only store the result once, for the possible mask.
+	 * If any result is -ERANGE, it will be the possible mask.
+	 * The result for the remaining masks will be the same.
+	 **/
+	ccode = copy_cpu_bitmask(dst, src);
+
+	dst = (struct cpumask *)rep->present_mask;
+	src = (struct cpumask *)&__cpu_present_mask;
+	copy_cpu_bitmask(dst, src);
+
+	dst = (struct cpumask *)rep->online_mask;
+	src = (struct cpumask *)&__cpu_online_mask;
+	copy_cpu_bitmask(dst, src);
+
+	dst = (struct cpumask *)rep->active_mask;
+	src = (struct cpumask *)&__cpu_active_mask;
+	copy_cpu_bitmask(dst, src);
+
+	spin_unlock_irqrestore(&bitmap_lock, flags);
+
+	if (ccode == -ERANGE) {
+		printk(KERN_DEBUG "%s: %s %u Copy bitmask range overflow\n",
+		       __FILE__, __FUNCTION__, __LINE__);
+		ccode = OK;
+	}
+
+	return ccode;
+}
+
+
 dispatch_t dispatch_table[] = {
 	handle_invalid,
 	handle_discover,
@@ -373,6 +416,7 @@ dispatch_t dispatch_table[] = {
 	handle_get_boot_state,
 	handle_get_cur_state,
 	handle_set_target_state,
+	handle_get_cpu_bitmasks,
 	handle_invalid
 };
 
@@ -1442,6 +1486,35 @@ static int write_cpu_target_file(int cpu, int target)
 	}
 	return ccode;
 }
+
+/******************************************************************************/
+/**
+ * @brief: Copy a single cpu bitmask.
+ *
+ * @param[out] dst - pointer to the destination bitmask
+ * @param[in]  src - pointer to the source bitmask
+ * @returns OK (0) or -ERANGE, which means the copy has been truncated
+ *
+ * @note: The copy truncation might occur because we assume a hard limit on CPUs
+ *        of 512, while most kernels are configured with a limit of 8K, which
+ *        consumes a lot of mostly unused storage.
+ *
+ ******************************************************************************/
+
+static int copy_cpu_bitmask(struct cpumask *dst, struct cpumask *src)
+{
+
+	if (!dst || !src) {
+		return -EINVAL;
+	}
+	if (nr_cpu_ids <= MAX_NR_CPUS) {
+		cpumask_copy(dst, src);
+		return OK;
+	}
+	bitmap_copy(cpumask_bits(dst), cpumask_bits(src), MAX_NR_CPUS);
+	return -ERANGE;
+}
+
 
 /******************************************************************************/
 /**

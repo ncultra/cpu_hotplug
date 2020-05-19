@@ -40,7 +40,7 @@ class HotPlug:
         self.msg_types = {'EMPTY': 0, 'REQUEST': 1, 'REPLY': 2, 'COMPLETE': 3}
         self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3,
                             'GET_BOOT_STATE': 4, 'GET_CURRENT_STATE': 5,
-                            'SET_TARGET_STATE': 6, 'LAST': 7}
+                            'SET_TARGET_STATE': 6, 'GET_CPU_BITMASK': 7, 'LAST': 8}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8,
                        'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11}
@@ -143,6 +143,9 @@ class HotPlug:
             return
         elif (self.args.get_state is True) and (self.args.cpu_list is not None):
             self.send_get_current_state_request(msg_dict, self.args.cpu_list)
+            return
+        elif (self.args.get_bitmasks is True):
+            self.send_get_bitmasks_request(msg_dict)
             return
         elif (self.args.set_target is not None) and \
              (self.args.cpu_list is not None):
@@ -522,6 +525,36 @@ class HotPlug:
         self.write_packed_message(_sock, reply)
         return
 
+    def send_get_bitmasks_request(self, msg_dict):
+        """Send a request forr the server to copy all four cpu bitmasks and return them.
+
+	@param[in] msg_dict = a Dictionary containing the get_bitmasks request
+
+        @note: there are four bitmasks: possible, present, available, and active.
+               Each bitmask has a specific meaning. See below, from linux cpumask.h
+
+        * The following particular system cpumasks and operations manage
+        * possible, present, active and online cpus.
+        *
+        *     cpu_possible_mask- has bit 'cpu' set iff cpu is populatable
+        *     cpu_present_mask - has bit 'cpu' set iff cpu is populated
+        *     cpu_online_mask  - has bit 'cpu' set iff cpu available to scheduler
+        *     cpu_active_mask  - has bit 'cpu' set iff cpu available to migration
+	"""
+        msg_dict['action'] = self.msg_actions['GET_CPU_BITMASKS']
+        self.client_send_rcv(msg_dict)
+        self.sock.close()
+        return
+
+    def handle_get_bitmasks_request(self, msg_dict, _sock):
+        """this request is only handled by the linux kernel module"""
+        print("Received a request to copy the cpu bitmasks")
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        msg_dict['result'] = self.errors['NOT_HANDLED']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
+
     def send_set_target_state_request(self, msg_dict, cpu_list, target):
         """Send a set target state request to the server.
 
@@ -617,7 +650,7 @@ class HotPlug:
 def check_args(args, parser):
     if args['listen'] == False and args['discover'] == False and args['get_boot_state'] == False and \
        args['get_state'] == False and args['plug'] == False and args['set_target'] == None and \
-       args['unplug'] == False:
+       args['unplug'] == False and args['get_bitmasks'] == False:
        parser.print_help()
        return False
 
@@ -633,6 +666,7 @@ def hotplug_main(args):
     parser.add_argument('--plug', action = 'store_true', help = 'plug in one or more cpus')
     parser.add_argument('--get_boot_state', action = 'store_true', help = 'get the boot state of one or more cpus')
     parser.add_argument('--get_state', action = 'store_true', help = 'get the current state of one or more cpus')
+    parser.add_argument('--get_bitmasks', action = 'store_true', help = 'get the four cpu bitmasks')
     parser.add_argument('--set_target', action = 'store', nargs = 1, type = int,
                         help = 'set the target state state for one or more cpus')
     parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')

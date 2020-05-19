@@ -30,14 +30,7 @@
 #include <linux/printk.h>
 #include <linux/kallsyms.h>
 #include <linux/preempt.h>
-
-
-
-extern atomic64_t SHOULD_SHUTDOWN;
-extern struct list_head connections;
-extern struct connection *listener;
-extern char *socket_name;
-extern uint32_t protocol_version;
+#include <linux/cpumask.h>
 
 
 #define _MODULE_LICENSE "GPL v2"
@@ -48,6 +41,17 @@ extern uint32_t protocol_version;
 		if (unlikely(!(s))) printk(KERN_DEBUG "assertion failed: " #s " at %s:%d\n", \
 					   __FILE__, __LINE__);		\
 	} while(0)
+
+extern atomic64_t SHOULD_SHUTDOWN;
+extern struct list_head connections;
+extern struct connection *listener;
+extern char *socket_name;
+extern uint32_t protocol_version;
+
+extern unsigned int nr_cpu_ids;
+extern struct cpumask __cpu_possible_mask, __cpu_online_mask;
+extern struct cpumask __cpu_present_mask, __cpu_active_mask;
+
 
 /**
  * TODO:  https://lwn.net/Articles/588444/
@@ -99,11 +103,25 @@ enum message_type {EMPTY = 0, REQUEST, REPLY, COMPLETE};
  * cpu_hotplug disable
  * get_{possible, present, available, active} masks
  **/
-enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_BOOT_STATE, GET_CURRENT_STATE, SET_TARGET_STATE, LAST};
+enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_BOOT_STATE, GET_CURRENT_STATE, SET_TARGET_STATE,
+		     GET_CPU_BITMASKS, LAST};
 enum message_errors {OK = 0, _EINVAL = 2, MSG_TYPE, MSG_VERSION, NOT_HANDLED, _EBUSY, _EPERM, NOT_IMPL,
 		     _ENOMEM, _EBADF, _ERANGE};
 
 /** see linux/include/cpumask.h and kernel/cpu.c exported bitmasks **/
+
+#define MAX_NR_CPUS 512
+/**
+ * @note: usually will be called using nr_cpu_ids
+ *        safe_cpu_bits(nr_cpu_ids);
+ **/
+static inline int safe_cpu_bits(int actual_cpu_ids)
+{
+	if (actual_cpu_ids <= MAX_NR_CPUS) {
+		return actual_cpu_ids;
+	}
+	return MAX_NR_CPUS;
+}
 
 
 struct hotplug_msg
