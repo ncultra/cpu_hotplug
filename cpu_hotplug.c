@@ -366,6 +366,20 @@ static int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *
 	return 0;
 }
 
+/******************************************************************************/
+/**
+ * @brief: handle a request to copy the kernel's cpu state bitmasks
+ *
+ * @param[in]  req - pointer to a request message
+ * @param[out] rep - pointer to the response message
+ * @returns OK (0) upon success, non-zero otherwise.
+ *
+ * @note: prints a debug message if nr_cpu_ids is greater than MAX_NR_CPUS (512)
+ *
+ * @note: returns the kernel's count of CPU ids in reply->cpu field.
+ *
+ ******************************************************************************/
+
 static int handle_get_cpu_bitmasks(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
 	int ccode = OK;
@@ -397,6 +411,11 @@ static int handle_get_cpu_bitmasks(struct hotplug_msg *req, struct hotplug_msg *
 	copy_cpu_bitmask(dst, src);
 
 	spin_unlock_irqrestore(&bitmap_lock, flags);
+
+	/**
+	 * store the number of of cpu IDs in the cpu field of the reply
+	 **/
+	rep->cpu = nr_cpu_ids;
 
 	if (ccode == -ERANGE) {
 		printk(KERN_DEBUG "%s: %s %u Copy bitmask range overflow\n",

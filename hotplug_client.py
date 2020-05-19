@@ -40,7 +40,7 @@ class HotPlug:
         self.msg_types = {'EMPTY': 0, 'REQUEST': 1, 'REPLY': 2, 'COMPLETE': 3}
         self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3,
                             'GET_BOOT_STATE': 4, 'GET_CURRENT_STATE': 5,
-                            'SET_TARGET_STATE': 6, 'GET_CPU_BITMASK': 7, 'LAST': 8}
+                            'SET_TARGET_STATE': 6, 'GET_CPU_BITMASKS': 7, 'LAST': 8}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8,
                        'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11}
@@ -540,6 +540,8 @@ class HotPlug:
         *     cpu_present_mask - has bit 'cpu' set iff cpu is populated
         *     cpu_online_mask  - has bit 'cpu' set iff cpu available to scheduler
         *     cpu_active_mask  - has bit 'cpu' set iff cpu available to migration
+
+        @note: returns the kernel's count of CPU IDs in the cpu field.
 	"""
         msg_dict['action'] = self.msg_actions['GET_CPU_BITMASKS']
         self.client_send_rcv(msg_dict)
