@@ -4,6 +4,7 @@ import sys
 import os
 import subprocess
 from struct import *
+import uuid
 import io
 
 class ParserError(Exception):
@@ -22,14 +23,14 @@ class HotPlug:
         The remainder of the initialization involves message header variables
         and Dictionaries for message types, actions, and errors.
         """
-        self.args = args
+        self.args = vars(args)
         self.sock = 0
-        if self.args.socket:
-            self.sock_name = args.socket
+        if self.args['socket']:
+            self.sock_name = self.args['socket']
         else:
             self.sock_name = "/var/run/cpu_hotplug.sock"
 
-        if self.args.listen:
+        if self.args['listen']:
             self.is_client = 0
         else:
             self.is_client = 1
@@ -116,6 +117,10 @@ class HotPlug:
         except OSError:
             print("Error connecting to {}".format(self.sock_name))
             sys.exit(1)
+        if self.args['uuid'] == None:
+            self.args['uuid'] = uuid.uuid4()
+        else:
+            self.args['uuid'] = uuid.UUID(self.args['uuid'])
         msg_dict = {'magic': self.CONNECTION_MAGIC,
                     'version': self.PROTOCOL_VERSION,
                     'msg_type': 1,
@@ -127,31 +132,32 @@ class HotPlug:
                     'possible_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'present_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'online_mask': [0, 0, 0, 0, 0, 0, 0, 0],
-                    'active_mask': [0, 0, 0, 0, 0, 0, 0, 0]}
+                    'active_mask': [0, 0, 0, 0, 0, 0, 0, 0],
+                    'uuid': self.args['uuid']}
 
-        if True == self.args.discover:
+        if True == self.args['discover']:
             print("Sending a Discovery Request")
             msg_dict['action'] = self.msg_actions['DISCOVER']
-        elif (self.args.unplug is True) and (self.args.cpu_list is not None):
-            self.send_unplug_request(msg_dict, self.args.cpu_list)
+        elif (self.args['unplug'] is True) and (self.args['cpu_list'] is not None):
+            self.send_unplug_request(msg_dict, self.args['cpu_list'])
             return
-        elif (self.args.plug is True) and (self.args.cpu_list is not None):
-            self.send_plug_request(msg_dict, self.args.cpu_list)
+        elif (self.args['plug'] is True) and (self.args['cpu_list'] is not None):
+            self.send_plug_request(msg_dict, self.args['cpu_list'])
             return
-        elif (self.args.get_boot_state is True) and (self.args.cpu_list is not None):
-            self.send_get_boot_state_request(msg_dict, self.args.cpu_list)
+        elif (self.args['get_boot_state'] is True) and (self.args['cpu_list'] is not None):
+            self.send_get_boot_state_request(msg_dict, self.args['cpu_list'])
             return
-        elif (self.args.get_state is True) and (self.args.cpu_list is not None):
-            self.send_get_current_state_request(msg_dict, self.args.cpu_list)
+        elif (self.args['get_state'] is True) and (self.args['cpu_list'] is not None):
+            self.send_get_current_state_request(msg_dict, self.args['cpu_list'])
             return
-        elif (self.args.get_bitmasks is True):
+        elif (self.args['get_bitmasks'] is True):
             self.send_get_bitmasks_request(msg_dict)
             return
-        elif (self.args.set_target is not None) and \
-             (self.args.cpu_list is not None):
+        elif (self.args['set_target'] is not None) and \
+             (self.args['cpu_list'] is not None):
             self.send_set_target_state_request(msg_dict,
-                                               self.args.cpu_list,
-                                               self.args.set_target)
+                                               self.args['cpu_list'],
+                                               self.args['set_target'])
             return
 
         else:
@@ -184,7 +190,7 @@ class HotPlug:
         @param[in] msg_dict - Dictionary containing message fields
         @returns   a packed structure containing the message fields
         """
-        msg = bytearray(288)
+        msg = bytearray(304)
         pack_into('=L', msg, 0, self.CONNECTION_MAGIC)
         pack_into('!L', msg, 4, self.PROTOCOL_VERSION)
         pack_into('=L', msg, 8, msg_dict['msg_type'])
@@ -206,6 +212,7 @@ class HotPlug:
         for q in msg_dict['active_mask']:
             pack_into('=Q', msg, offs, q)
             offs += 8
+        pack_into('16s', msg, offs, msg_dict['uuid'].bytes)
         return msg
 
     def print_packed_message(self, msg):
@@ -239,7 +246,7 @@ class HotPlug:
         @returns   structure of  bytes containing message fields
         """
         try:
-            buf = _sock.recv(288)
+            buf = _sock.recv(304)
             print("Read {} bytes".format(len(buf)))
             return buf
         except OSError:
@@ -264,6 +271,11 @@ class HotPlug:
         cpu_present_mask = unpack_from('=QQQQQQQQ', msg, 96)
         cpu_online_mask = unpack_from('=QQQQQQQQ', msg, 160)
         cpu_active_mask = unpack_from('=QQQQQQQQ', msg, 224)
+        _uuid = unpack_from('16s', msg, 288)
+        print(_uuid[0])
+        msg_uuid = uuid.UUID(bytes=_uuid[0], version=4)
+        print(msg_uuid)
+
         return {'magic': magic[0],
                 'version': version[0],
                 'msg_type': msg_type[0],
@@ -275,7 +287,8 @@ class HotPlug:
                 'possible_mask': cpu_possible_mask,
                 'present_mask': cpu_present_mask,
                 'online_mask': cpu_online_mask,
-                'active_mask': cpu_active_mask}
+                'active_mask': cpu_active_mask,
+                'uuid': msg_uuid}
 
     def check_magic(self, magic):
         """Compare the magic number field of a message to its defined value.
@@ -659,8 +672,7 @@ def check_args(args, parser):
 
 
 def hotplug_main(args):
-    usage_string = """usage: {} [...]""".format(sys.argv[0])
-    parser = argparse.ArgumentParser(description=usage_string)
+    parser = argparse.ArgumentParser()
     parser.add_argument('--listen', action = 'store_true', help = 'listen for connections')
     parser.add_argument('--socket', action = 'store_true', help = 'path to domain socket')
     parser.add_argument('--discover', action = 'store_true', help = 'send a discovery request')
@@ -671,6 +683,7 @@ def hotplug_main(args):
     parser.add_argument('--get_bitmasks', action = 'store_true', help = 'get the four cpu bitmasks')
     parser.add_argument('--set_target', action = 'store', nargs = 1, type = int,
                         help = 'set the target state state for one or more cpus')
+    parser.add_argument('--uuid', action = 'store', help = 'set the uuid of the domain')
     parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')
 
     args = parser.parse_args()

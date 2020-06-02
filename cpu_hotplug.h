@@ -138,10 +138,11 @@ struct hotplug_msg
 	 * see include/linux/cpumask.h for definitions.
 	 * assume 512 potential cpu IDs.
 	 **/
-	uint64_t possible_mask[8]; /* 32 */
-	uint64_t present_mask[8]; /* 96 */
-	uint64_t online_mask[8]; /* 160 */
-	uint64_t active_mask[8]; /* 224 */
+	uint64_t possible_mask[8]; /*  48 */
+	uint64_t present_mask[8];  /*  96 */
+	uint64_t online_mask[8];   /* 160 */
+	uint64_t active_mask[8];   /* 224 */
+	uint8_t uuid[16];          /* 288 -- domain uuid */
 } __attribute__((packed));
 
 #define CONNECTION_MAGIC ((uint32_t)0xf8cb820d)
