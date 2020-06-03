@@ -721,7 +721,7 @@ def check_args(args, parser):
         return False
     elif args['listen'] == False and args['discover'] == False and args['get_boot_state'] == False and \
        args['get_state'] == False and args['plug'] == False and args['set_target'] == None and \
-       args['unplug'] == False and args['get_bitmasks'] == False:
+       args['unplug'] == False and args['get_bitmasks'] == False and args['uuid'] == None:
        parser.print_help()
        return False
 
