@@ -9,19 +9,19 @@ import io
 
 class ParserError(Exception):
     def __init__(self, message, errors):
-        super(ParserError, self).__init__(message)
+        super(parsererror, self).__init__(message)
         self.error = error
 
 class HotPlug:
     def __init__(self, args):
-        """Initialize the HotPlug object.
+        """initialize the hotplug object.
 
-        Arguments determine whether the object is a client or server, and the
-        name of the Unix domain socket file. Server mode is active when the
+        arguments determine whether the object is a client or server, and the
+        name of the unix domain socket file. server mode is active when the
         --listen argument is present.
 
-        The remainder of the initialization involves message header variables
-        and Dictionaries for message types, actions, and errors.
+        the remainder of the initialization involves message header variables
+        and dictionaries for message types, actions, and errors.
         """
         self.args = vars(args)
         self.sock = 0
@@ -34,6 +34,12 @@ class HotPlug:
             self.is_client = 0
         else:
             self.is_client = 1
+
+        if self.args['uuid'] == None:
+            self.driver_uuid = uuid.UUID(int = 0, version = 4)
+        else:
+            self.driver_uuid = uuid.UUID(self.args['uuid'][0], version = 4)
+
         self.CONNECTION_MAGIC = 0xf8cb820d
         self.magic = pack('=L', self.CONNECTION_MAGIC)
         self.PROTOCOL_VERSION = 0x00000100
@@ -41,10 +47,11 @@ class HotPlug:
         self.msg_types = {'EMPTY': 0, 'REQUEST': 1, 'REPLY': 2, 'COMPLETE': 3}
         self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3,
                             'GET_BOOT_STATE': 4, 'GET_CURRENT_STATE': 5,
-                            'SET_TARGET_STATE': 6, 'GET_CPU_BITMASKS': 7, 'LAST': 8}
+                            'SET_TARGET_STATE': 6, 'GET_CPU_BITMASKS': 7,
+                            'SET_DRIVER_UUID': 8, 'LAST': 9}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8,
-                       'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11}
+                       'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11, 'UUID': 12}
 
     def server(self):
         """Listen for socket connections and respond to hotplug messages.
@@ -112,15 +119,16 @@ class HotPlug:
         transmission. Receives response messages in binary format and unpacks them into
         Dictionaries.
         """
+
+        if self.args['uuid'] == None:
+            self.client_uuid = uuid.UUID(int = 0, version = 4)
+        else:
+            self.client_uuid = uuid.UUID(self.args['uuid'][0], version = 4)
         try:
             self.sock_connect(self.sock_name)
         except OSError:
             print("Error connecting to {}".format(self.sock_name))
             sys.exit(1)
-        if self.args['uuid'] == None:
-            self.args['uuid'] = uuid.uuid4()
-        else:
-            self.args['uuid'] = uuid.UUID(self.args['uuid'])
         msg_dict = {'magic': self.CONNECTION_MAGIC,
                     'version': self.PROTOCOL_VERSION,
                     'msg_type': 1,
@@ -133,7 +141,7 @@ class HotPlug:
                     'present_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'online_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'active_mask': [0, 0, 0, 0, 0, 0, 0, 0],
-                    'uuid': self.args['uuid']}
+                    'uuid': self.client_uuid}
 
         if True == self.args['discover']:
             print("Sending a Discovery Request")
@@ -158,6 +166,9 @@ class HotPlug:
             self.send_set_target_state_request(msg_dict,
                                                self.args['cpu_list'],
                                                self.args['set_target'])
+            return
+        elif (self.args['uuid'] is not None):
+            self.send_set_driver_uuid_request(msg_dict)
             return
 
         else:
@@ -212,7 +223,7 @@ class HotPlug:
         for q in msg_dict['active_mask']:
             pack_into('=Q', msg, offs, q)
             offs += 8
-        pack_into('16s', msg, offs, msg_dict['uuid'].bytes)
+        pack_into('16s', msg, offs, self.driver_uuid.bytes)
         return msg
 
     def print_packed_message(self, msg):
@@ -271,10 +282,7 @@ class HotPlug:
         cpu_present_mask = unpack_from('=QQQQQQQQ', msg, 96)
         cpu_online_mask = unpack_from('=QQQQQQQQ', msg, 160)
         cpu_active_mask = unpack_from('=QQQQQQQQ', msg, 224)
-        _uuid = unpack_from('16s', msg, 288)
-        print(_uuid[0])
-        msg_uuid = uuid.UUID(bytes=_uuid[0], version=4)
-        print(msg_uuid)
+        msg_uuid = uuid.UUID(bytes=unpack_from('16s', msg, 288)[0], version = 4)
 
         return {'magic': magic[0],
                 'version': version[0],
@@ -290,8 +298,18 @@ class HotPlug:
                 'active_mask': cpu_active_mask,
                 'uuid': msg_uuid}
 
+    def check_uuid(self, _uuid):
+        """Compare the uuid field of a request message to the server's defined value.
+
+        @param[in] _uuid - a uuid value that must match the driver (server) uuid
+
+        @returns True if the uuid is correct, False otherwise.
+        """
+        if _uuid == self.driver_uuid:
+            return True
+        return False
     def check_magic(self, magic):
-        """Compare the magic number field of a message to its defined value.
+        """Compare the magic number field of a request message to its defined value.
 
         @param[in] magic - a magic number that must be the first element of any
                    hotplug message
@@ -303,7 +321,7 @@ class HotPlug:
             return False
 
     def check_version(self, version):
-        """Compare the major version of a message with the server's major version.
+        """Compare the major version of a request message with the server's major version.
 
 	@param[in] version - the major version, which defines compatibility
 	@returns True if the version matches the server, False otherwise
@@ -328,6 +346,8 @@ class HotPlug:
             raise ParserError("Bad message header", self.errors['EINVAL'])
         if False == self.check_version(request['version']):
             raise ParserError("Bad message protocol version", self.errors['MSG_VERSION'])
+        if False == self.check_uuid(request['uuid']):
+            raise ParserError("Bad message uuid", self.errors['UUID'])
         if request['msg_type'] != self.msg_types['REQUEST']:
             raise ParserError("Wrong message type", self.errors['MSG_TYPE'])
 
@@ -335,6 +355,7 @@ class HotPlug:
         if request['action'] == self.msg_actions['DISCOVER']:
             # respond with a copy of this message (as a reply type)
             request['msg_type'] = self.msg_types['REPLY']
+            request['uuid'] = self.driver_uuid
             reply = self.pack_message(request)
             self.write_packed_message(_sock, reply)
             return
@@ -359,6 +380,9 @@ class HotPlug:
             self.handle_set_target_state(request, _sock)
             return
 
+        if request['action'] == self.msg_actions['SET_DRIVER_UUID']:
+           self.handle_set_driver_uuid(request, _sock)
+           return
         raise ParserError("Request message not handled", self.errors['NOT_HANDLED'])
 
     def client_send_rcv(self, msg_dict):
@@ -618,6 +642,35 @@ class HotPlug:
         self.write_packed_message(_sock, reply)
         return
 
+    def send_set_driver_uuid_request(self, msg_dict):
+        """Sends a SET_DRIVER_UUID request to the server.
+
+        @param[in] msg_dict - Dictionary containing a set_driver_uuid message
+
+        @note: causes the driver to set its driver_uuid attribute. Also sets the
+               client_uuid attribute for this request.
+        """
+        msg_dict['action'] = self.msg_actions['SET_DRIVER_UUID']
+
+        self.client_send_rcv(msg_dict)
+        self.sock.close()
+        return
+
+    def handle_set_driver_uuid(self, msg_dict, _sock):
+        """Server handler for the set_driver_uuid request (above).
+
+	@param[in] msg_dict - Dictionary containing a plug-in message
+        @param[in] _sock - socket connected to the client
+
+        @note: this is a server method.
+        """
+        self.driver_uuid = msg_dict['uuid']
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        msg_dict['result'] = self.errors['OK']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
+
     def get_current_state(self, cpu):
         """Reads the cpu's hotplug state file.
 
@@ -663,7 +716,10 @@ class HotPlug:
 
 
 def check_args(args, parser):
-    if args['listen'] == False and args['discover'] == False and args['get_boot_state'] == False and \
+    if args['uuid'] == None:
+        print("--uuid is a required parameter")
+        return False
+    elif args['listen'] == False and args['discover'] == False and args['get_boot_state'] == False and \
        args['get_state'] == False and args['plug'] == False and args['set_target'] == None and \
        args['unplug'] == False and args['get_bitmasks'] == False:
        parser.print_help()
@@ -683,7 +739,7 @@ def hotplug_main(args):
     parser.add_argument('--get_bitmasks', action = 'store_true', help = 'get the four cpu bitmasks')
     parser.add_argument('--set_target', action = 'store', nargs = 1, type = int,
                         help = 'set the target state state for one or more cpus')
-    parser.add_argument('--uuid', action = 'store', help = 'set the uuid of the domain')
+    parser.add_argument('--uuid', action = 'store', nargs = 1, help = 'required - uuid for the client or server')
     parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')
 
     args = parser.parse_args()
