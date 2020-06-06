@@ -114,14 +114,20 @@ static void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 	if (req && rep) {
 		rep->magic = req->magic;
 		rep->version = req->version;
+    rep->serial = req->serial;
 		rep->msg_type = REPLY;
 		rep->cpu = req->cpu;
 		rep->action = req->action;
+    rep->current_state = req->current_state;
+    rep->target_state = req->current_state;
 		rep->result = 0;
+    uuid_copy(&rep->uuid, &req->uuid);
+    rep->map_length = req->map_length;
 		memset(rep->possible_mask, 0x00, sizeof(rep->possible_mask));
 		memset(rep->present_mask, 0x00, sizeof(rep->present_mask));
 		memset(rep->online_mask, 0x00, sizeof(rep->online_mask));
 		memset(rep->active_mask, 0x00, sizeof(rep->active_mask));
+
 	}
 	return;
 }
@@ -483,6 +489,10 @@ int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 		return -EINVAL;
 	}
 
+	if (uuid_is_null(&request->uuid)) {
+		return -EINVAL;
+	}
+
 	if (request->msg_type == REQUEST &&
 	    request->action > ZERO &&
 	    request->action < LAST) {
@@ -784,10 +794,6 @@ static void link_new_connection_work(struct connection *c,
 	}
 }
 
-/**
- * tear down the connection but don't free the connection
- * memory. do free resources, struct sock.
- **/
 /******************************************************************************/
 /**
  * @brief: stops and frees the resources used by the connection, including
@@ -798,6 +804,8 @@ static void link_new_connection_work(struct connection *c,
  *
  * @note: does not free the struct connection; this allows it to work with both
  *        statically and heap-allocated struct connections.
+ *        Tear down the connection but don't free the connection memory.
+ *        Do free resources, struct sock, etc.
  *
  ******************************************************************************/
 
@@ -821,9 +829,6 @@ static void *destroy_connection(struct connection *c)
 	return c;
 }
 
-/**
-
- **/
 /******************************************************************************/
 /**
  * @brief: traverse the connection list looking for closed connections. If found,
@@ -945,7 +950,7 @@ static void k_msg_server(struct kthread_work *work)
 								       sizeof(struct hotplug_msg),
 								       &reply,
 								       0);
-					if (bytes_written == sizeof(struct hotplug_msg) &&
+					if (bytes_written == CONNECTION_MAX_MESSAGE &&
 					    (! atomic64_read(&SHOULD_SHUTDOWN))) {
 						/* do it all again */
 						/**
