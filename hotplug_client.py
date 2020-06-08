@@ -43,6 +43,7 @@ class HotPlug:
         self.CONNECTION_MAGIC = 0xf8cb820d
         self.magic = pack('=L', self.CONNECTION_MAGIC)
         self.PROTOCOL_VERSION = 0x00000100
+        self.CONNECTION_MAX_MESSAGE = 316
         self.prot_ver = pack('!L', self.PROTOCOL_VERSION)
         self.msg_types = {'EMPTY': 0, 'REQUEST': 1, 'REPLY': 2, 'COMPLETE': 3}
         self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3,
@@ -52,6 +53,22 @@ class HotPlug:
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8,
                        'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11, 'UUID': 12}
+
+        self.offsets = {'OFFSET_MAGIC': 0,
+                        'OFFSET_VERSION': 4,
+                        'OFFSET_NONCE': 8,
+                        'OFFSET_MSG_TYPE': 16,
+                        'OFFSET_CPU': 20,
+                        'OFFSET_ACTION': 24,
+                        'OFFSET_CURRENT_STATE': 28,
+                        'OFFSET_TARGET_STATE': 32,
+                        'OFFSET_RESULT': 36,
+                        'OFFSET_UUID': 40,
+                        'OFFSET_MAP_LENGTH': 56,
+                        'OFFSET_POSSIBLE_MASK': 60,
+                        'OFFSET_PRESENT_MASK': 124,
+                        'OFFSET_ONLINE_MASK': 188,
+                        'OFFSET_ACTIVE_MASK': 252}
 
     def server(self):
         """Listen for socket connections and respond to hotplug messages.
@@ -131,17 +148,19 @@ class HotPlug:
             sys.exit(1)
         msg_dict = {'magic': self.CONNECTION_MAGIC,
                     'version': self.PROTOCOL_VERSION,
+                    'nonce': unpack('=Q', os.urandom(8))[0],
                     'msg_type': 1,
                     'cpu': 0,
                     'action': 0,
                     'current_state': 0,
                     'target_state': 0,
                     'result': 0,
+                    'uuid': self.client_uuid,
+                    'map_length': 64,
                     'possible_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'present_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'online_mask': [0, 0, 0, 0, 0, 0, 0, 0],
-                    'active_mask': [0, 0, 0, 0, 0, 0, 0, 0],
-                    'uuid': self.client_uuid}
+                    'active_mask': [0, 0, 0, 0, 0, 0, 0, 0]}
 
         if True == self.args['discover']:
             print("Sending a Discovery Request")
@@ -201,29 +220,33 @@ class HotPlug:
         @param[in] msg_dict - Dictionary containing message fields
         @returns   a packed structure containing the message fields
         """
-        msg = bytearray(304)
-        pack_into('=L', msg, 0, self.CONNECTION_MAGIC)
-        pack_into('!L', msg, 4, self.PROTOCOL_VERSION)
-        pack_into('=L', msg, 8, msg_dict['msg_type'])
-        pack_into('=L', msg, 12, msg_dict['cpu'])
-        pack_into('=L', msg, 16, msg_dict['action'])
-        pack_into('=L', msg, 20, msg_dict['current_state'])
-        pack_into('=L', msg, 24, msg_dict['target_state'])
-        pack_into('=L', msg, 28, msg_dict['result'])
-        offs = 32
+        msg = bytearray(self.CONNECTION_MAX_MESSAGE)
+        pack_into('=L', msg, self.offsets['OFFSET_MAGIC'], self.CONNECTION_MAGIC)
+        pack_into('!L', msg, self.offsets['OFFSET_VERSION'], self.PROTOCOL_VERSION)
+        pack_into('=Q', msg, self.offsets['OFFSET_NONCE'], msg_dict['nonce'])
+        pack_into('=L', msg, self.offsets['OFFSET_MSG_TYPE'], msg_dict['msg_type'])
+        pack_into('=L', msg, self.offsets['OFFSET_CPU'], msg_dict['cpu'])
+        pack_into('=L', msg, self.offsets['OFFSET_ACTION'], msg_dict['action'])
+        pack_into('=L', msg, self.offsets['OFFSET_CURRENT_STATE'], msg_dict['current_state'])
+        pack_into('=L', msg, self.offsets['OFFSET_TARGET_STATE'], msg_dict['target_state'])
+        pack_into('=L', msg, self.offsets['OFFSET_RESULT'], msg_dict['result'])
+        pack_into('16s', msg, self.offsets['OFFSET_UUID'], msg_dict['uuid'].bytes)
+        pack_into('=L', msg, self.offsets['OFFSET_MAP_LENGTH'], msg_dict['map_length'])
+        offs = self.offsets['OFFSET_POSSIBLE_MASK']
         for q in msg_dict['possible_mask']:
             pack_into('=Q', msg, offs, q)
             offs += 8
+        offs = self.offsets['OFFSET_PRESENT_MASK']
         for q in msg_dict['present_mask']:
             pack_into('=Q', msg, offs, q)
             offs += 8
+        offs = self.offsets['OFFSET_ONLINE_MASK']
         for q in msg_dict['online_mask']:
             pack_into('=Q', msg, offs, q)
             offs += 8
+        offs = self.offsets['OFFSET_ACTIVE_MASK']
         for q in msg_dict['active_mask']:
             pack_into('=Q', msg, offs, q)
-            offs += 8
-        pack_into('16s', msg, offs, self.driver_uuid.bytes)
         return msg
 
     def print_packed_message(self, msg):
@@ -257,7 +280,7 @@ class HotPlug:
         @returns   structure of  bytes containing message fields
         """
         try:
-            buf = _sock.recv(304)
+            buf = _sock.recv(self.CONNECTION_MAX_MESSAGE)
             print("Read {} bytes".format(len(buf)))
             return buf
         except OSError:
@@ -270,33 +293,37 @@ class HotPlug:
         @param[in] msg - a structure containing packed bytes.
         @returns   a Dictionary containing message fields.
         """
-        magic = unpack_from('=L', msg, 0)
-        version = unpack_from('!L', msg, 4)
-        msg_type = unpack_from('=L', msg, 8)
-        cpu = unpack_from('=L', msg, 12)
-        action = unpack_from('=L', msg, 16)
-        current_state = unpack_from('=L', msg, 20)
-        target_state = unpack_from('=L', msg, 24)
-        result = unpack_from('=L', msg, 28)
-        cpu_possible_mask = unpack_from('=QQQQQQQQ', msg, 32)
-        cpu_present_mask = unpack_from('=QQQQQQQQ', msg, 96)
-        cpu_online_mask = unpack_from('=QQQQQQQQ', msg, 160)
-        cpu_active_mask = unpack_from('=QQQQQQQQ', msg, 224)
-        msg_uuid = uuid.UUID(bytes=unpack_from('16s', msg, 288)[0], version = 4)
+        magic = unpack_from('=L', msg, self.offsets['OFFSET_MAGIC'])
+        version = unpack_from('!L', msg, self.offsets['OFFSET_VERSION'])
+        nonce = unpack_from('=Q', msg, self.offsets['OFFSET_NONCE'])
+        msg_type = unpack_from('=L', msg, self.offsets['OFFSET_MSG_TYPE'])
+        cpu = unpack_from('=L', msg, self.offsets['OFFSET_CPU'])
+        action = unpack_from('=L', msg, self.offsets['OFFSET_ACTION'])
+        current_state = unpack_from('=L', msg, self.offsets['OFFSET_CURRENT_STATE'])
+        target_state = unpack_from('=L', msg, self.offsets['OFFSET_TARGET_STATE'])
+        result = unpack_from('=L', msg, self.offsets['OFFSET_RESULT'])
+        msg_uuid = uuid.UUID(bytes=unpack_from('16s', msg, self.offsets['OFFSET_UUID'])[0], version = 4)
+        map_length = unpack_from('=L', msg, self.offsets['OFFSET_MAP_LENGTH'])
+        cpu_possible_mask = unpack_from('=QQQQQQQQ', msg, self.offsets['OFFSET_POSSIBLE_MASK'])
+        cpu_present_mask = unpack_from('=QQQQQQQQ', msg, self.offsets['OFFSET_PRESENT_MASK'])
+        cpu_online_mask = unpack_from('=QQQQQQQQ', msg, self.offsets['OFFSET_ONLINE_MASK'])
+        cpu_active_mask = unpack_from('=QQQQQQQQ', msg, self.offsets['OFFSET_ACTIVE_MASK'])
 
         return {'magic': magic[0],
                 'version': version[0],
+                'nonce': nonce[0],
                 'msg_type': msg_type[0],
                 'cpu': cpu[0],
                 'action': action[0],
                 'current_state': current_state[0],
                 'target_state': target_state[0],
                 'result': result[0],
+                'uuid': msg_uuid,
+                'map_length': map_length[0],
                 'possible_mask': cpu_possible_mask,
                 'present_mask': cpu_present_mask,
                 'online_mask': cpu_online_mask,
-                'active_mask': cpu_active_mask,
-                'uuid': msg_uuid}
+                'active_mask': cpu_active_mask}
 
     def check_uuid(self, _uuid):
         """Compare the uuid field of a request message to the server's defined value.

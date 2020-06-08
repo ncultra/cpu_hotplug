@@ -81,8 +81,8 @@ static int import_symbols(struct sym_import *imports, int size)
  ******************************************************************************/
 
 static uint64_t find_private(struct sym_import *imports,
-			    const char *name,
-			    int size)
+			     const char *name,
+			     int size)
 {
 	if (imports == NULL ||
 	    (sizeof(*imports) / sizeof(struct sym_import) < size)) {
@@ -114,15 +114,15 @@ static void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 	if (req && rep) {
 		rep->magic = req->magic;
 		rep->version = req->version;
-    rep->serial = req->serial;
+		rep->nonce = req->nonce;
 		rep->msg_type = REPLY;
 		rep->cpu = req->cpu;
 		rep->action = req->action;
-    rep->current_state = req->current_state;
-    rep->target_state = req->current_state;
+		rep->current_state = req->current_state;
+		rep->target_state = req->current_state;
 		rep->result = 0;
-    uuid_copy(&rep->uuid, &req->uuid);
-    rep->map_length = req->map_length;
+		uuid_copy(&rep->uuid, &req->uuid);
+		rep->map_length = req->map_length;
 		memset(rep->possible_mask, 0x00, sizeof(rep->possible_mask));
 		memset(rep->present_mask, 0x00, sizeof(rep->present_mask));
 		memset(rep->online_mask, 0x00, sizeof(rep->online_mask));
@@ -1110,8 +1110,8 @@ static void awaken_accept_thread(void)
 	addr_len = sizeof(addr.sun_path) - 1;
 
 	memcpy(addr.sun_path,
-         socket_name,
-         (path_len < addr_len) ? path_len : addr_len);
+	       socket_name,
+	       (path_len < addr_len) ? path_len : addr_len);
 	ccode = kernel_connect(sock, (struct sockaddr *)&addr, sizeof(addr.sun_path), 0L);
 	if (! ccode) {
 		kernel_sock_shutdown(sock, SHUT_RDWR);
@@ -1505,7 +1505,7 @@ static int write_cpu_target_file(int cpu, int target)
 	if (ccode > 0) {
 		ccode = snprintf(buf, 16, "%d\n", target);
 		if (ccode > 0) {
-		  ccode = write_file(fname, buf, 16, &pos);
+			ccode = write_file(fname, buf, 16, &pos);
 		}
 	}
 	return ccode;
@@ -1595,8 +1595,8 @@ int __init socket_interface_init(void)
 	}
 
 	_cpu_report_state = (int (*)(int))find_private(sym_imports,
-					 "cpu_report_state",
-					 SIZE_IMPORTS);
+						       "cpu_report_state",
+						       SIZE_IMPORTS);
 	if (_cpu_report_state == NULL) {
 		return -ENFILE;
 	}

@@ -31,6 +31,7 @@
 #include <linux/kallsyms.h>
 #include <linux/preempt.h>
 #include <linux/cpumask.h>
+#include <linux/random.h>
 #include <linux/uuid.h>
 
 
@@ -130,7 +131,7 @@ static inline int safe_cpu_bits(int actual_cpu_ids)
  *
  * @magic: message header that must be equal to CONNECTION_MAGIC (0xf8cb820d)
  * @version: four-byte network order with major, minor, release, reserved fields
- * @serial: message serial number - request and reply should have the same serial
+ * @nonce: message id - request and reply should have the same nonce
  * @msg_type: request (1) or reply (2)
  * @cpu: logical cpu number (zero-indexed), has special significance for bitmap requests
  * @action: command plug, unplug, etc.
@@ -151,15 +152,15 @@ struct hotplug_msg
 {
 	uint32_t magic;            /* 0 */
 	uint32_t version;          /* 4 */
-  uint64_t serial;           /* 8 */
+	uint64_t nonce;            /* 8 */
 	uint32_t msg_type;         /* 16 */
 	uint32_t cpu;              /* 20 logical cpu */
 	uint32_t action;           /* 24 0 == unplug, 1 = plug  */
 	uint32_t current_state;    /* 28 */
 	uint32_t target_state;     /* 32 */
 	uint32_t result;           /* 36 0 == success, non-zero == error */
-  uuid_t uuid;               /* 40  -- domain uuid 16 bytes */
-  uint32_t map_length;       /* 56 -- valid bits in cpu maps below */
+	uuid_t uuid;               /* 40  -- domain uuid 16 bytes */
+	uint32_t map_length;       /* 56 -- valid bytes in cpu maps below */
 
 	/**
 	 * see include/linux/cpumask.h for definitions.
@@ -173,7 +174,7 @@ struct hotplug_msg
 
 #define OFFSET_MAGIC           0
 #define OFFSET_VERSION         4
-#define OFFSET_SERIAL          8
+#define OFFSET_NONCE           8
 #define OFFSET_MSG_TYPE       16
 #define OFFSET_CPU            20
 #define OFFSET_ACTION         24
@@ -212,8 +213,8 @@ struct connection {
  **/
 static inline void mark_conn_closed(struct connection *c)
 {
-  __CLEAR_FLAG(c->flags, SOCK_CONNECTED);
-  __SET_FLAG(c->flags, CONNECTION_CLOSED);
+	__CLEAR_FLAG(c->flags, SOCK_CONNECTED);
+	__SET_FLAG(c->flags, CONNECTION_CLOSED);
 }
 
 struct sym_import {
@@ -273,6 +274,25 @@ static inline int maj_ver_compat(struct hotplug_msg *m)
 	return 0;
 }
 
+static inline void gen_nonce(uint64_t *nonce)
+{
+	if (nonce) {
+		get_random_bytes(nonce, sizeof(uint64_t));
+	}
+	return;
+}
+
+static inline bool check_nonce(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	if (req && rep) {
+		if (req->nonce == rep->nonce) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+
 void free_message(struct hotplug_msg *m);
 struct hotplug_msg *new_message(uint8_t *buf, size_t len);
 
@@ -301,7 +321,5 @@ size_t vfs_read_file(char *name, void **buf, size_t max_count, loff_t *pos);
 struct connection *init_connection(struct connection *c, uint64_t flags, void *p);
 int __init socket_interface_init(void);
 void __exit socket_interface_exit(void);
-
-
 
 #endif /** __CPU_HOTPLUG_H **/
