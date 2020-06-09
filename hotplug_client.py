@@ -44,12 +44,19 @@ class HotPlug:
         self.magic = pack('=L', self.CONNECTION_MAGIC)
         self.PROTOCOL_VERSION = 0x00000100
         self.CONNECTION_MAX_MESSAGE = 316
+
+        if self.args['map_length'] == None:
+            self.MAP_LENGTH = 64
+        else:
+            self.MAP_LENGTH = self.args['map_length'][0]
+
+        self.MAP_LENGTH = 64
         self.prot_ver = pack('!L', self.PROTOCOL_VERSION)
         self.msg_types = {'EMPTY': 0, 'REQUEST': 1, 'REPLY': 2, 'COMPLETE': 3}
         self.msg_actions = {'ZERO': 0, 'DISCOVER': 1, 'UNPLUG': 2, 'PLUG': 3,
                             'GET_BOOT_STATE': 4, 'GET_CURRENT_STATE': 5,
                             'SET_TARGET_STATE': 6, 'GET_CPU_BITMASKS': 7,
-                            'SET_DRIVER_UUID': 8, 'LAST': 9}
+                            'SET_DRIVER_UUID': 8, 'SET_MAP_LENGTH': 9, 'LAST': 10}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8,
                        'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11, 'UUID': 12,
@@ -158,7 +165,7 @@ class HotPlug:
                     'target_state': 0,
                     'result': 0,
                     'uuid': self.client_uuid,
-                    'map_length': 64,
+                    'map_length': self.MAP_LENGTH,
                     'possible_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'present_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'online_mask': [0, 0, 0, 0, 0, 0, 0, 0],
@@ -189,9 +196,14 @@ class HotPlug:
                                                self.args['cpu_list'],
                                                self.args['set_target'])
             return
+        elif (self.args['map_length'] is not None):
+            self.send_map_length_request(msg_dict)
+            return
+        #keep the client uuid dispatcher last
         elif (self.args['uuid'] is not None):
             self.send_set_driver_uuid_request(msg_dict)
             return
+
         else:
             raise ParserError("Unsupported message action", self.errors['NOT_HANDLED'])
 
@@ -423,7 +435,9 @@ class HotPlug:
         if request['action'] == self.msg_actions['SET_DRIVER_UUID']:
             self.handle_set_driver_uuid(request, _sock)
             return
-
+        if request['action'] == self.msg_actions['SET_MAP_LENGTH']:
+            self.handle_map_length_request(request, _sock)
+            return
         # we got a message we can't handle. send a response with the error code
         self.send_not_handled_reply(request, _sock)
         return
@@ -730,6 +744,26 @@ class HotPlug:
         self.write_packed_message(_sock, reply)
         return
 
+    def send_map_length_request(self, msg_dict):
+        if (self.args['map_length'][0] < 0 or self.args['map_length'][0] > 64):
+            raise ParserError("Map length out of range", self.errors['ERANGE'])
+        msg_dict['map_length'] = self.args['map_length'][0]
+        msg_dict['action'] = self.msg_actions['SET_MAP_LENGTH']
+        self.client_send_rcv(msg_dict)
+        self.sock.close()
+        return
+
+    def handle_map_length_request(self, msg_dict, _sock):
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        if (msg_dict['map_length'] < 0 or msg_dict['map_length'] > 64):
+            msg_dict['result'] = self.errors['ERANGE']
+        else:
+            msg_dict['result'] = self.errors['OK']
+            self.MAP_LENGTH = msg_dict['map_length']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
+
     def get_current_state(self, cpu):
         """Reads the cpu's hotplug state file.
 
@@ -775,16 +809,14 @@ class HotPlug:
 
 
 def check_args(args, parser):
-    if args['uuid'] == None:
-        print("--uuid is a required parameter")
-        return False
-    elif args['listen'] == False and args['discover'] == False and args['get_boot_state'] == False and \
+    if args['listen'] == False and args['discover'] == False and args['get_boot_state'] == False and \
        args['get_state'] == False and args['plug'] == False and args['set_target'] == None and \
        args['unplug'] == False and args['get_bitmasks'] == False and args['uuid'] == None:
-       parser.print_help()
-       return False
-
-
+        parser.print_help()
+        return False
+    elif args['uuid'] == None:
+        print("--uuid is a required parameter")
+        return False
 
 def hotplug_main(args):
     parser = argparse.ArgumentParser()
@@ -796,8 +828,8 @@ def hotplug_main(args):
     parser.add_argument('--get_boot_state', action = 'store_true', help = 'get the boot state of one or more cpus')
     parser.add_argument('--get_state', action = 'store_true', help = 'get the current state of one or more cpus')
     parser.add_argument('--get_bitmasks', action = 'store_true', help = 'get the four cpu bitmasks')
-    parser.add_argument('--set_target', action = 'store', nargs = 1, type = int,
-                        help = 'set the target state state for one or more cpus')
+    parser.add_argument('--set_target', action = 'store', nargs = 1, type = int, help = 'set the target state state for one or more cpus')
+    parser.add_argument('--map_length', action = 'store', nargs = 1, type = int, help = 'set the length of the cpu bitmaps')
     parser.add_argument('--uuid', action = 'store', nargs = 1, help = 'required - uuid for the client or server')
     parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')
 

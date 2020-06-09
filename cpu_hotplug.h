@@ -106,7 +106,7 @@ enum message_type {EMPTY = 0, REQUEST, REPLY, COMPLETE};
  * get_{possible, present, available, active} masks
  **/
 enum message_action {ZERO = 0, DISCOVER, UNPLUG, PLUG, GET_BOOT_STATE, GET_CURRENT_STATE, SET_TARGET_STATE,
-                     GET_CPU_BITMASKS, SET_DRIVER_UUID, LAST};
+                     GET_CPU_BITMASKS, SET_DRIVER_UUID, SET_MAP_LENGTH, LAST};
 enum message_errors {OK = 0, _EINVAL = 2, MSG_TYPE, MSG_VERSION, NOT_HANDLED, _EBUSY, _EPERM, NOT_IMPL,
 		     _ENOMEM, _EBADF, _ERANGE};
 
