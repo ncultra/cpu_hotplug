@@ -52,7 +52,8 @@ class HotPlug:
                             'SET_DRIVER_UUID': 8, 'LAST': 9}
         self.errors = {'OK': 0, 'EINVAL': 2, 'MSG_TYPE': 3, 'MSG_VERSION': 4,
                        'NOT_HANDLED': 5, 'EBUSY': 6, 'EPERM': 7, 'NOT_IMPL': 8,
-                       'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11, 'UUID': 12}
+                       'ENOMEM': 9, 'EBADF': 10, 'ERANGE': 11, 'UUID': 12,
+                       'MISMATCHED_NONCE': 13}
 
         self.offsets = {'OFFSET_MAGIC': 0,
                         'OFFSET_VERSION': 4,
@@ -130,6 +131,7 @@ class HotPlug:
 
     def client(self):
         """
+
         Client mode of the HotPlug object. Sends requests and reads responses.
 
         Forms request messages as Dictionaries and packs them into binary format for
@@ -164,7 +166,8 @@ class HotPlug:
 
         if True == self.args['discover']:
             print("Sending a Discovery Request")
-            msg_dict['action'] = self.msg_actions['DISCOVER']
+            self.send_discovery_request(msg_dict)
+            return
         elif (self.args['unplug'] is True) and (self.args['cpu_list'] is not None):
             self.send_unplug_request(msg_dict, self.args['cpu_list'])
             return
@@ -178,7 +181,7 @@ class HotPlug:
             self.send_get_current_state_request(msg_dict, self.args['cpu_list'])
             return
         elif (self.args['get_bitmasks'] is True):
-            self.send_get_bitmasks_request(msg_dict)
+            self.send_get_cpu_bitmasks_request(msg_dict)
             return
         elif (self.args['set_target'] is not None) and \
              (self.args['cpu_list'] is not None):
@@ -189,15 +192,8 @@ class HotPlug:
         elif (self.args['uuid'] is not None):
             self.send_set_driver_uuid_request(msg_dict)
             return
-
         else:
             raise ParserError("Unsupported message action", self.errors['NOT_HANDLED'])
-        msg = self.pack_message(msg_dict)
-        self.write_packed_message(self.sock, msg)
-        buf = self.read_raw_message(self.sock)
-        self.sock.close()
-        response = self.unpack_raw_message(buf)
-        self.print_unpacked_message(response)
 
     def sock_connect(self, sock_name):
         """Connect to the server's listening Unix domian socket.
@@ -358,6 +354,19 @@ class HotPlug:
         else:
             return False
 
+    def check_nonce(self, request, response):
+        """Compare the nonce in a request message to the nonce in a response message.
+
+        @param[in] request - a dictionary containing the request message
+        @param[in] response - a dictionary containing the response message
+        @returns True if the nonces match, False otherwise
+        """
+
+        if request['nonce'] == response['nonce']:
+            return True
+        else:
+            raise ParserError("Message nonces to not match", self.errors['MISMATCHED_NONCE'])
+
     def dispatch_request(self, request, _sock):
         """Parses an unpacked Dictionary containing a message, dispatches it to
         the correct handler.
@@ -407,10 +416,24 @@ class HotPlug:
             self.handle_set_target_state(request, _sock)
             return
 
+        if request['action'] == self.msg_actions['GET_CPU_BITMASKS']:
+            self.handle_get_cpu_bitmasks_request(request, _sock)
+            return
+
         if request['action'] == self.msg_actions['SET_DRIVER_UUID']:
-           self.handle_set_driver_uuid(request, _sock)
-           return
-        raise ParserError("Request message not handled", self.errors['NOT_HANDLED'])
+            self.handle_set_driver_uuid(request, _sock)
+            return
+
+        # we got a message we can't handle. send a response with the error code
+        self.send_not_handled_reply(request, _sock)
+        return
+
+    def send_not_handled_reply(self, msg_dict, _sock):
+        msg_dict['msg_type'] = self.msg_types['REPLY']
+        msg_dict['result'] = self.errors['NOT_HANDLED']
+        reply = self.pack_message(msg_dict)
+        self.write_packed_message(_sock, reply)
+        return
 
     def client_send_rcv(self, msg_dict):
         """Client send/receive method.
@@ -424,7 +447,14 @@ class HotPlug:
         self.write_packed_message(self.sock, msg)
         buf = self.read_raw_message(self.sock)
         response = self.unpack_raw_message(buf)
+        self.check_nonce(msg_dict, response)
         self.print_unpacked_message(response)
+
+    def send_discovery_request(self, msg_dict):
+        msg_dict['action'] = self.msg_actions['DISCOVER']
+        self.client_send_rcv(msg_dict)
+        self.sock.close()
+        return
 
     def send_unplug_request(self, msg_dict, cpu_list):
         """Sends an unplug request to the server for each CPU in the list
@@ -438,6 +468,7 @@ class HotPlug:
             msg_dict['cpu'] = cpu
             msg_dict['action'] = self.msg_actions['UNPLUG']
             self.client_send_rcv(msg_dict)
+            msg_dict['nonce'] = unpack('=Q', os.urandom(8))[0]
         self.sock.close()
         return
 
@@ -484,6 +515,7 @@ class HotPlug:
             msg_dict['cpu'] = cpu
             msg_dict['action'] = self.msg_actions['PLUG']
             self.client_send_rcv(msg_dict)
+            msg_dict['nonce'] = unpack('=Q', os.urandom(8))[0]
         self.sock.close()
         return
 
@@ -534,6 +566,7 @@ class HotPlug:
             print("sending for cpu {}".format(cpu))
             msg_dict['cpu'] = cpu
             self.client_send_rcv(msg_dict)
+            msg_dict['nonce'] = unpack('=Q', os.urandom(8))[0]
         self.sock.close()
         return
 
@@ -563,6 +596,7 @@ class HotPlug:
             print("sending for cpu {}".format(cpu))
             msg_dict['cpu'] = cpu
             self.client_send_rcv(msg_dict)
+            msg_dict['nonce'] = unpack('=Q', os.urandom(8))[0]
         self.sock.close()
         return
 
@@ -589,7 +623,7 @@ class HotPlug:
         self.write_packed_message(_sock, reply)
         return
 
-    def send_get_bitmasks_request(self, msg_dict):
+    def send_get_cpu_bitmasks_request(self, msg_dict):
         """Send a request forr the server to copy all four cpu bitmasks and return them.
 
 	@param[in] msg_dict = a Dictionary containing the get_bitmasks request
@@ -612,13 +646,10 @@ class HotPlug:
         self.sock.close()
         return
 
-    def handle_get_bitmasks_request(self, msg_dict, _sock):
+    def handle_get_cpu_bitmasks_request(self, msg_dict, _sock):
         """this request is only handled by the linux kernel module"""
         print("Received a request to copy the cpu bitmasks")
-        msg_dict['msg_type'] = self.msg_types['REPLY']
-        msg_dict['result'] = self.errors['NOT_HANDLED']
-        reply = self.pack_message(msg_dict)
-        self.write_packed_message(_sock, reply)
+        self.send_not_handled_reply(msg_dict, _sock)
         return
 
     def send_set_target_state_request(self, msg_dict, cpu_list, target):
@@ -640,6 +671,7 @@ class HotPlug:
             print("sending for cpu {}".format(cpu))
             msg_dict['cpu'] = cpu
             self.client_send_rcv(msg_dict)
+            msg_dict['nonce'] = unpack('=Q', os.urandom(8))[0]
         self.sock.close()
         return
 
