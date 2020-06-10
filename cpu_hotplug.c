@@ -9,6 +9,10 @@ struct list_head connections;
 struct connection *listener = NULL;
 
 uint32_t protocol_version = 0x010000;
+uuid_t driver_uuid = {
+	.b = {0}
+};
+uint32_t map_length = 64;
 
 char *socket_name = "/var/run/cpu_hotplug.sock";
 module_param(socket_name, charp, 0644);
@@ -148,9 +152,12 @@ static void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 
 static int handle_invalid(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
-	init_reply(req, rep);
-	rep->result = EINVAL;
-	return 0;
+	int ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		rep->result = EINVAL;
+	}
+	return ccode;
 }
 
 
@@ -170,11 +177,14 @@ static int handle_invalid(struct hotplug_msg *req, struct hotplug_msg *rep)
 
 static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
-	init_reply(req, rep);
-	rep->result = OK;
-	return 0;
+	int ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		rep->result = OK;
+		ccode = OK;
+	}
+	return ccode;
 }
-
 
 /******************************************************************************/
 /**
@@ -192,33 +202,35 @@ static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
 
 static int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
-	int ccode = OK;
-	init_reply(req, rep);
-	ccode = cpu_down(req->cpu);
-	switch(ccode) {
-	case OK:
-	{
-		rep->result = OK;
-		break;
+	int ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		ccode = cpu_down(req->cpu);
+		switch(ccode) {
+		case OK:
+		{
+			rep->result = OK;
+			break;
+		}
+		case -EBUSY:
+		{
+			rep->result = _EBUSY;
+			break;
+		}
+		case -EPERM:
+		{
+			rep->result = _EPERM;
+			break;
+		}
+		case -EINVAL:
+		default:
+		{
+			rep->result = _EINVAL;
+			break;
+		}
+		}
 	}
-	case -EBUSY:
-	{
-		rep->result = _EBUSY;
-		break;
-	}
-	case -EPERM:
-	{
-		rep->result = _EPERM;
-		break;
-	}
-	case -EINVAL:
-	default:
-	{
-		rep->result = _EINVAL;
-		break;
-	}
-	}
-	return 0;
+	return ccode;
 }
 
 
@@ -238,34 +250,36 @@ static int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 
 static int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
-	int ccode = OK;
 
-	init_reply(req, rep);
-	ccode = cpu_up(req->cpu);
-	switch(ccode) {
-	case OK:
-	{
-		rep->result = OK;
-		break;
+	int ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		ccode = cpu_up(req->cpu);
+		switch(ccode) {
+		case OK:
+		{
+			rep->result = OK;
+			break;
+		}
+		case -EBUSY:
+		{
+			rep->result = _EBUSY;
+			break;
+		}
+		case -EPERM:
+		{
+			rep->result = _EPERM;
+			break;
+		}
+		case -EINVAL:
+		default:
+		{
+			rep->result = _EINVAL;
+			break;
+		}
+		}
 	}
-	case -EBUSY:
-	{
-		rep->result = _EBUSY;
-		break;
-	}
-	case -EPERM:
-	{
-		rep->result = _EPERM;
-		break;
-	}
-	case -EINVAL:
-	default:
-	{
-		rep->result = _EINVAL;
-		break;
-	}
-	}
-	return 0;
+	return ccode;
 }
 
 /******************************************************************************/
@@ -283,9 +297,14 @@ static int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 
 static int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
-	init_reply(req, rep);
-	rep->current_state = (uint32_t)_cpu_report_state(req->cpu);
-	return 0;
+	int ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		rep->current_state = (uint32_t)_cpu_report_state(req->cpu);
+		rep->result = OK;
+		ccode = OK;
+	}
+	return ccode;
 }
 
 /******************************************************************************/
@@ -305,30 +324,33 @@ static int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *re
 
 static int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
-	int32_t ccode = 0;
-	init_reply(req, rep);
-	ccode = read_cpu_state_file(req->cpu);
-	if (ccode < 0) {
-		switch(ccode) {
-		case -ENOMEM:
-			rep->result = _ENOMEM;
-			break;
-		case -EBADF:
-			rep->result = _EBADF;
-			break;
-		case -ERANGE:
-			rep->result = _ERANGE;
-			break;
-		default:
-			rep->result = _EINVAL;
-			break;
+	int32_t ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		ccode = read_cpu_state_file(req->cpu);
+		if (ccode < 0) {
+			switch(ccode) {
+			case -ENOMEM:
+				rep->result = _ENOMEM;
+				break;
+			case -EBADF:
+				rep->result = _EBADF;
+				break;
+			case -ERANGE:
+				rep->result = _ERANGE;
+				break;
+			default:
+				rep->result = _EINVAL;
+				break;
+			}
+		}
+		else {
+			rep->result = OK;
+			rep->current_state = ccode;
+			ccode = OK;
 		}
 	}
-	else {
-		rep->result = 0;
-		rep->current_state = ccode;
-	}
-	return 0;
+	return ccode;
 }
 
 /******************************************************************************/
@@ -349,27 +371,29 @@ static int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep
 
 static int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
-	int ccode = 0;
-
-	init_reply(req, rep);
-	ccode = write_cpu_target_file(req->cpu, req->target_state);
-	if (ccode < 0) {
-		switch(ccode) {
-		case -EBADF:
-			rep->result = _EBADF;
-			break;
-		case -ERANGE:
-			rep->result = _ERANGE;
-			break;
-		default:
-			rep->result = _EINVAL;
-			break;
+	int ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		ccode = write_cpu_target_file(req->cpu, req->target_state);
+		if (ccode < 0) {
+			switch(ccode) {
+			case -EBADF:
+				rep->result = _EBADF;
+				break;
+			case -ERANGE:
+				rep->result = _ERANGE;
+				break;
+			default:
+				rep->result = _EINVAL;
+				break;
+			}
+		}
+		else {
+			rep->result = OK;
+			ccode = OK;
 		}
 	}
-	else {
-		rep->result = 0;
-	}
-	return 0;
+	return ccode;
 }
 
 /******************************************************************************/
@@ -388,47 +412,96 @@ static int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *
 
 static int handle_get_cpu_bitmasks(struct hotplug_msg *req, struct hotplug_msg *rep)
 {
-	int ccode = OK;
+	int ccode = _EINVAL;
 	unsigned long flags = 0UL;
 	struct cpumask *dst = NULL, *src = NULL;
 
-	init_reply(req, rep);
-	spin_lock_irqsave(&bitmap_lock, flags);
-	dst = (struct cpumask *)rep->possible_mask;
-	src = (struct cpumask *)&__cpu_possible_mask;
+	if (req && rep) {
+		init_reply(req, rep);
+		spin_lock_irqsave(&bitmap_lock, flags);
+		dst = (struct cpumask *)rep->possible_mask;
+		src = (struct cpumask *)&__cpu_possible_mask;
 
-	/**
-	 * only store the result once, for the possible mask.
-	 * If any result is -ERANGE, it will be the possible mask.
-	 * The result for the remaining masks will be the same.
-	 **/
-	ccode = copy_cpu_bitmask(dst, src);
+		/**
+		 * only store the result once, for the possible mask.
+		 * If any result is -ERANGE, it will be the possible mask.
+		 * The result for the remaining masks will be the same.
+		 **/
+		ccode = copy_cpu_bitmask(dst, src);
 
-	dst = (struct cpumask *)rep->present_mask;
-	src = (struct cpumask *)&__cpu_present_mask;
-	copy_cpu_bitmask(dst, src);
+		dst = (struct cpumask *)rep->present_mask;
+		src = (struct cpumask *)&__cpu_present_mask;
+		copy_cpu_bitmask(dst, src);
 
-	dst = (struct cpumask *)rep->online_mask;
-	src = (struct cpumask *)&__cpu_online_mask;
-	copy_cpu_bitmask(dst, src);
+		dst = (struct cpumask *)rep->online_mask;
+		src = (struct cpumask *)&__cpu_online_mask;
+		copy_cpu_bitmask(dst, src);
 
-	dst = (struct cpumask *)rep->active_mask;
-	src = (struct cpumask *)&__cpu_active_mask;
-	copy_cpu_bitmask(dst, src);
+		dst = (struct cpumask *)rep->active_mask;
+		src = (struct cpumask *)&__cpu_active_mask;
+		copy_cpu_bitmask(dst, src);
 
-	spin_unlock_irqrestore(&bitmap_lock, flags);
+		spin_unlock_irqrestore(&bitmap_lock, flags);
 
-	/**
-	 * store the number of of cpu IDs in the cpu field of the reply
-	 **/
-	rep->cpu = nr_cpu_ids;
+		/**
+		 * store the number of of cpu IDs in the cpu field of the reply
+		 **/
+		rep->cpu = nr_cpu_ids;
 
-	if (ccode == -ERANGE) {
-		printk(KERN_DEBUG "%s: %s %u Copy bitmask range overflow\n",
-		       __FILE__, __FUNCTION__, __LINE__);
+		if (ccode == -ERANGE) {
+			rep->result = _ERANGE;
+			printk(KERN_DEBUG "%s: %s %u Copy bitmask range overflow\n",
+			       __FILE__, __FUNCTION__, __LINE__);
+			ccode = OK;
+		}
+	}
+	return ccode;
+}
+
+
+/******************************************************************************/
+/**
+ * @brief: handle a request to set the driver's uuid (domain ID)
+ *
+ * @param[in]  req - pointer to a request message
+ * @param[out] rep - pointer to the response message
+ * @returns OK (0) upon success, non-zero otherwise.
+ *
+ ******************************************************************************/
+
+static int handle_set_driver_uuid(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	int ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		uuid_copy(&driver_uuid, &(req->uuid));
+		rep->result = OK;
 		ccode = OK;
 	}
+	return ccode;
+}
 
+/******************************************************************************/
+/**
+ * @brief: handle a request to set the driver's map length
+ *
+ * @param[in]  req - pointer to a request message
+ * @param[out] rep - pointer to the response message
+ * @returns OK (0) upon success, non-zero otherwise.
+ *
+ * @note: map length informs the client (kernel) how many bytes of the cpu
+ *        bitmaps are relevant
+ *
+ ******************************************************************************/
+static int handle_set_map_length(struct hotplug_msg *req, struct hotplug_msg *rep)
+{
+	int ccode = _EINVAL;
+	if (req && rep) {
+		init_reply(req, rep);
+		map_length = req->map_length;
+		rep->result = OK;
+		ccode = OK;
+	}
 	return ccode;
 }
 
@@ -442,6 +515,8 @@ dispatch_t dispatch_table[] = {
 	handle_get_cur_state,
 	handle_set_target_state,
 	handle_get_cpu_bitmasks,
+	handle_set_driver_uuid,
+	handle_set_map_length,
 	handle_invalid
 };
 

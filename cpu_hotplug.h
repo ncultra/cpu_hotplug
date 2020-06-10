@@ -49,6 +49,9 @@ extern struct list_head connections;
 extern struct connection *listener;
 extern char *socket_name;
 extern uint32_t protocol_version;
+extern uuid_t driver_uuid;
+extern uint32_t map_length;
+
 
 extern unsigned int nr_cpu_ids;
 extern struct cpumask __cpu_possible_mask, __cpu_online_mask;
@@ -291,7 +294,6 @@ static inline bool check_nonce(struct hotplug_msg *req, struct hotplug_msg *rep)
 	}
 	return 0;
 }
-
 
 void free_message(struct hotplug_msg *m);
 struct hotplug_msg *new_message(uint8_t *buf, size_t len);
