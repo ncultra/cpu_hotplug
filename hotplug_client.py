@@ -43,7 +43,7 @@ class HotPlug:
         self.CONNECTION_MAGIC = 0xf8cb820d
         self.magic = pack('=L', self.CONNECTION_MAGIC)
         self.PROTOCOL_VERSION = 0x00000100
-        self.CONNECTION_MAX_MESSAGE = 316
+        self.CONNECTION_MAX_MESSAGE = 324
 
         if self.args['map_length'] == None:
             self.MAP_LENGTH = 64
@@ -76,7 +76,8 @@ class HotPlug:
                         'OFFSET_POSSIBLE_MASK': 60,
                         'OFFSET_PRESENT_MASK': 124,
                         'OFFSET_ONLINE_MASK': 188,
-                        'OFFSET_ACTIVE_MASK': 252}
+                        'OFFSET_ACTIVE_MASK': 252,
+                        'OFFSET_CYCLES': 316}
 
     def server(self):
         """Listen for socket connections and respond to hotplug messages.
@@ -169,7 +170,8 @@ class HotPlug:
                     'possible_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'present_mask': [0, 0, 0, 0, 0, 0, 0, 0],
                     'online_mask': [0, 0, 0, 0, 0, 0, 0, 0],
-                    'active_mask': [0, 0, 0, 0, 0, 0, 0, 0]}
+                    'active_mask': [0, 0, 0, 0, 0, 0, 0, 0],
+                    'cycles': 0}
 
         if True == self.args['discover']:
             print("Sending a Discovery Request")
@@ -255,6 +257,7 @@ class HotPlug:
         offs = self.offsets['OFFSET_ACTIVE_MASK']
         for q in msg_dict['active_mask']:
             pack_into('=Q', msg, offs, q)
+        pack_into('=L', msg, self.offsets['OFFSET_CYCLES'], msg_dict['cycles'])
         return msg
 
     def print_packed_message(self, msg):
@@ -316,7 +319,7 @@ class HotPlug:
         cpu_present_mask = unpack_from('=QQQQQQQQ', msg, self.offsets['OFFSET_PRESENT_MASK'])
         cpu_online_mask = unpack_from('=QQQQQQQQ', msg, self.offsets['OFFSET_ONLINE_MASK'])
         cpu_active_mask = unpack_from('=QQQQQQQQ', msg, self.offsets['OFFSET_ACTIVE_MASK'])
-
+        cycles = unpack_from('=L', msg, self.offsets['OFFSET_CYCLES'])
         return {'magic': magic[0],
                 'version': version[0],
                 'nonce': nonce[0],
@@ -331,7 +334,8 @@ class HotPlug:
                 'possible_mask': cpu_possible_mask,
                 'present_mask': cpu_present_mask,
                 'online_mask': cpu_online_mask,
-                'active_mask': cpu_active_mask}
+                'active_mask': cpu_active_mask,
+                'cycles': cycles[0]}
 
     def check_uuid(self, _uuid):
         """Compare the uuid field of a request message to the server's defined value.

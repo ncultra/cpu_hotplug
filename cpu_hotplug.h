@@ -147,6 +147,8 @@ static inline int safe_cpu_bits(int actual_cpu_ids)
  * @present_mask: 512-bit map, 1 bit set for each present (populated) cpu
  * @online_mask: 512-bit map, 1 bit set for each online cpu
  * @active_mask: 512-bit map, 1 bit set for each powered cpu (could be hot-unplugged)
+ * @cycles: when non-zero, contains the number of cycles consumed by the current
+ *          operation
  *
  * all fields are present in both request and reply messages. By convention, unused
  * fields are zeroed.
@@ -173,7 +175,8 @@ struct hotplug_msg
 	uint64_t present_mask[8];  /* 124 */
 	uint64_t online_mask[8];   /* 188 */
 	uint64_t active_mask[8];   /* 252 */
-} __attribute__((packed));   /* 316 bytes */
+	uint64_t cycles;           /* 316 */
+} __attribute__((packed));   /* 324 bytes */
 
 #define OFFSET_MAGIC           0
 #define OFFSET_VERSION         4
@@ -190,6 +193,10 @@ struct hotplug_msg
 #define OFFSET_PRESENT_MASK  124
 #define OFFSET_ONLINE_MASK   188
 #define OFFSET_ACTIVE_MASK   252
+#define OFFSET_CYCLES        316
+/**
+ * sizeof(struct hotplug_msg) == 324
+ **/
 
 #define CONNECTION_MAGIC ((uint32_t)0xf8cb820d)
 #define CONNECTION_MAX_HEADER sizeof(struct hotplug_msg)
@@ -257,6 +264,24 @@ static inline int check_version(struct hotplug_msg *m)
 		}
 	}
 	return 0;
+}
+
+
+
+static inline uint64_t read_timer(void)
+{
+	uint32_t hi, lo;
+	asm volatile("rdtsc\n\t" : "=a" (lo), "=d" (hi));
+	return ((uint64_t)(hi) << 32 | lo);
+}
+
+static inline uint64_t cycles_elapsed(uint64_t begin, uint64_t end)
+{
+	uint64_t elapsed = end - begin;
+	if (end <= begin) {
+		return 0;
+	}
+	return elapsed;
 }
 
 /**

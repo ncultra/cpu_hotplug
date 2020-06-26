@@ -7,6 +7,8 @@ DEFINE_SPINLOCK(bitmap_lock);
 struct list_head connections;
 
 struct connection *listener = NULL;
+int hotplug_ap_state = CPUHP_INVALID;
+int hotplug_bp_state = CPUHP_INVALID;
 
 uint32_t protocol_version = 0x010000;
 uuid_t driver_uuid = {
@@ -131,6 +133,7 @@ static void init_reply(struct hotplug_msg *req, struct hotplug_msg *rep)
 		memset(rep->present_mask, 0x00, sizeof(rep->present_mask));
 		memset(rep->online_mask, 0x00, sizeof(rep->online_mask));
 		memset(rep->active_mask, 0x00, sizeof(rep->active_mask));
+		rep->cycles = 0;
 
 	}
 	return;
@@ -156,6 +159,7 @@ static int handle_invalid(struct hotplug_msg *req, struct hotplug_msg *rep)
 	if (req && rep) {
 		init_reply(req, rep);
 		rep->result = EINVAL;
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 	}
 	return ccode;
 }
@@ -181,6 +185,7 @@ static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
 	if (req && rep) {
 		init_reply(req, rep);
 		rep->result = OK;
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		ccode = OK;
 	}
 	return ccode;
@@ -206,6 +211,7 @@ static int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 	if (req && rep) {
 		init_reply(req, rep);
 		ccode = cpu_down(req->cpu);
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		switch(ccode) {
 		case OK:
 		{
@@ -255,6 +261,7 @@ static int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 	if (req && rep) {
 		init_reply(req, rep);
 		ccode = cpu_up(req->cpu);
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		switch(ccode) {
 		case OK:
 		{
@@ -301,6 +308,7 @@ static int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *re
 	if (req && rep) {
 		init_reply(req, rep);
 		rep->current_state = (uint32_t)_cpu_report_state(req->cpu);
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		rep->result = OK;
 		ccode = OK;
 	}
@@ -328,6 +336,7 @@ static int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep
 	if (req && rep) {
 		init_reply(req, rep);
 		ccode = read_cpu_state_file(req->cpu);
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		if (ccode < 0) {
 			switch(ccode) {
 			case -ENOMEM:
@@ -375,6 +384,7 @@ static int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *
 	if (req && rep) {
 		init_reply(req, rep);
 		ccode = write_cpu_target_file(req->cpu, req->target_state);
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		if (ccode < 0) {
 			switch(ccode) {
 			case -EBADF:
@@ -442,6 +452,7 @@ static int handle_get_cpu_bitmasks(struct hotplug_msg *req, struct hotplug_msg *
 		copy_cpu_bitmask(dst, src);
 
 		spin_unlock_irqrestore(&bitmap_lock, flags);
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 
 		/**
 		 * store the number of of cpu IDs in the cpu field of the reply
@@ -475,6 +486,7 @@ static int handle_set_driver_uuid(struct hotplug_msg *req, struct hotplug_msg *r
 	if (req && rep) {
 		init_reply(req, rep);
 		uuid_copy(&driver_uuid, &(req->uuid));
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		rep->result = OK;
 		ccode = OK;
 	}
@@ -499,6 +511,7 @@ static int handle_set_map_length(struct hotplug_msg *req, struct hotplug_msg *re
 	if (req && rep) {
 		init_reply(req, rep);
 		map_length = req->map_length;
+		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		rep->result = OK;
 		ccode = OK;
 	}
@@ -520,22 +533,38 @@ dispatch_t dispatch_table[] = {
 	handle_invalid
 };
 
+
 /**
- * @brief: callback prior to cpu coming online
+ * @brief: callback "before plug"
  **/
-static int my_cpu_online(unsigned int cpu)
+static int my_cpu_bp_online(unsigned int cpu)
 {
-	int ccode = 0;
-	return ccode;
+	return 0;
 }
 
 /**
- * @brief: callback prior to cpu going offline
+ * @brief: callback "before unplug"
  **/
-static int my_cpu_going_offline(unsigned int cpu)
+static int my_cpu_bp_offline(unsigned int cpu)
 {
-	int ccode = 0;
-	return ccode;
+	return 0;
+}
+
+
+/**
+ * @brief: callback "after plug"
+ **/
+static int my_cpu_ap_online(unsigned int cpu)
+{
+	return 0;
+}
+
+/**
+ * @brief: callback "after unplug"
+ **/
+static int my_cpu_ap_offline(unsigned int cpu)
+{
+	return 0;
 }
 
 /******************************************************************************/
@@ -571,6 +600,7 @@ int parse_hotplug_req(struct hotplug_msg *request, struct hotplug_msg *response)
 	if (request->msg_type == REQUEST &&
 	    request->action > ZERO &&
 	    request->action < LAST) {
+		request->cycles = read_timer();
 		return dispatch_table[request->action](request, response);
 	}
 	else {
@@ -758,9 +788,7 @@ static void k_accept(struct kthread_work *work)
 		/**
 		 * first try to reap a closed connection
 		 **/
-		spin_lock(&connections_lock);
 		new_connection = reap_closed();
-		spin_unlock(&connections_lock);
 		if (new_connection != NULL) {
 			destroy_connection(new_connection);
 		}
@@ -919,13 +947,16 @@ static void *destroy_connection(struct connection *c)
 static struct connection *reap_closed(void)
 {
 	struct connection *cursor;
+	spin_lock(&connections_lock);
 	list_for_each_entry(cursor, &connections, l) {
 		if (cursor && __FLAG_IS_SET(CONNECTION_CLOSED, cursor->flags)) {
 			list_del(&cursor->l);
+			spin_unlock(&connections_lock);
 			return cursor;
 		}
 
 	}
+	spin_unlock(&connections_lock);
 	return NULL;
 }
 
@@ -945,7 +976,6 @@ static int __attribute__((used)) reap_and_destroy(void)
 {
 	struct connection *dead;
 	int count = 0;
-	spin_lock(&connections_lock);
 	dead = reap_closed();
 	while (dead != NULL) {
 		destroy_connection(dead);
@@ -953,7 +983,6 @@ static int __attribute__((used)) reap_and_destroy(void)
 		count++;
 		dead = reap_closed();
 	}
-	spin_unlock(&connections_lock);
 	return count;
 }
 
@@ -1031,7 +1060,7 @@ static void k_msg_server(struct kthread_work *work)
 						/**
 						 * return without closing the connection
 						 **/
-						is_queued =kthread_queue_work(worker, work);
+						is_queued = kthread_queue_work(worker, work);
 						up(&c->s_lock);
 						return;
 					}
@@ -1622,18 +1651,24 @@ static int copy_cpu_bitmask(struct cpumask *dst, struct cpumask *src)
  * @returns dynamic state number assigned to this module
  *
  * @note: called upon initialization
+ * @note: needs better error handling
  *
  ******************************************************************************/
 
 static int cpu_hotplug_init(void)
 {
-	int ccode = 0;
-	ccode = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
-					  "x86/demo:online",
-					  my_cpu_online,
-					  my_cpu_going_offline);
 
-	return ccode;
+	hotplug_bp_state = cpuhp_setup_state_nocalls(CPUHP_BP_PREPARE_DYN,
+						     "x86/demo:online",
+						     my_cpu_bp_online,
+						     my_cpu_bp_offline);
+
+	hotplug_ap_state = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+						   "x86/demo:online",
+						   my_cpu_ap_online,
+						   my_cpu_ap_offline);
+
+	return 0;
 }
 
 /******************************************************************************/
@@ -1648,7 +1683,14 @@ static int cpu_hotplug_init(void)
 
 static void cpu_hotplug_cleanup(void)
 {
-	cpuhp_remove_state_nocalls(CPUHP_AP_ONLINE_DYN);
+	if (hotplug_bp_state >= CPUHP_BP_PREPARE_DYN &&
+	    hotplug_bp_state <= CPUHP_BP_PREPARE_DYN_END) {
+		cpuhp_remove_state_nocalls(hotplug_bp_state);
+	}
+	if (hotplug_ap_state >= CPUHP_AP_ONLINE_DYN &&
+	    hotplug_ap_state <= CPUHP_AP_ONLINE_DYN_END) {
+		cpuhp_remove_state_nocalls(hotplug_ap_state);
+	}
 }
 
 
