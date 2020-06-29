@@ -9,12 +9,15 @@ import io
 
 class ParserError(Exception):
     def __init__(self, message, errors):
-        super(parsererror, self).__init__(message)
+        super(parserError, self).__init__(message)
         self.error = error
 
 class HotPlug:
     def __init__(self, args):
         """initialize the hotplug object.
+
+        args must be a dictionary. The script invocation for __main__ converts
+        the argparse.Namespace object to a dictionary before using it.
 
         arguments determine whether the object is a client or server, and the
         name of the unix domain socket file. server mode is active when the
@@ -23,13 +26,13 @@ class HotPlug:
         the remainder of the initialization involves message header variables
         and dictionaries for message types, actions, and errors.
         """
-        self.args = vars(args)
+        self.args = args
         self.sock = 0
-        if self.args['socket']:
+        if self.args['socket'] is not False:
             self.sock_name = self.args['socket']
         else:
             self.sock_name = "/var/run/cpu_hotplug.sock"
-
+        print(self.sock_name)
         if self.args['listen']:
             self.is_client = 0
         else:
@@ -346,6 +349,8 @@ class HotPlug:
         """
         if _uuid == self.driver_uuid:
             return True
+        print(_uuid)
+        print(self.driver_uuid)
         return False
     def check_magic(self, magic):
         """Compare the magic number field of a request message to its defined value.
@@ -487,6 +492,7 @@ class HotPlug:
             msg_dict['action'] = self.msg_actions['UNPLUG']
             self.client_send_rcv(msg_dict)
             msg_dict['nonce'] = unpack('=Q', os.urandom(8))[0]
+            msg_dict['msg_type'] = self.msg_types['REQUEST']
         self.sock.close()
         return
 
@@ -837,12 +843,12 @@ def hotplug_main(args):
     parser.add_argument('--uuid', action = 'store', nargs = 1, help = 'required - uuid for the client or server')
     parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')
 
-    args = parser.parse_args()
-    if check_args(vars(args), parser) == False:
+    vargs = vars(parser.parse_args())
+    if check_args(vargs, parser) == False:
         return
 
-    hotplug = HotPlug(args)
-    if args.listen:
+    hotplug = HotPlug(vargs)
+    if vargs['listen'] == True:
         try:
             hotplug.server()
         except KeyboardInterrupt:
