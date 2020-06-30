@@ -12,6 +12,21 @@ class ParserError(Exception):
         super(parserError, self).__init__(message)
         self.error = error
 
+def empty_args():
+    empty =  {'listen': False,
+              'socket': False,
+              'discover': False,
+              'unplug': False,
+              'plug': False,
+              'get_boot_state': False,
+              'get_state': False,
+              'get_bitmasks': False,
+              'set_target': None,
+              'map_length': None,
+              'uuid': None,
+              'cpu_list': None}
+    return empty
+
 class HotPlug:
     def __init__(self, args):
         """initialize the hotplug object.

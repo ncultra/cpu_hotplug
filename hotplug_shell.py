@@ -17,23 +17,6 @@ def run_stress(count, timeout):
                          "-d", "{}".format(count)])
     return stress_test
 
-def empty_args():
-    empty =  {'listen': False,
-              'socket': False,
-              'discover': False,
-              'unplug': False,
-              'plug': False,
-              'get_boot_state': False,
-              'get_state': False,
-              'get_bitmasks': False,
-              'set_target': None,
-              'map_length': None,
-              'uuid': None,
-              'cpu_list': None}
-    return empty
-
-
-
 def unplug_cpus(cpu_list, interval, _uuid):
     hp_args = empty_args()
     hp_args['unplug'] = True
