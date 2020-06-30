@@ -7,16 +7,6 @@ import argparse
 import time
 from hotplug_client import *
 
-#    stress -t 10 -c 4 -i 4 -m 4 -d 4
-def run_stress(count, timeout):
-    stress_test = Popen(["/usr/bin/stress",
-                         "-t", "{}".format(timeout),
-                         "-c", "{}".format(count),
-                         "-i", "{}".format(count),
-                         "-m", "{}".format(count),
-                         "-d", "{}".format(count)])
-    return stress_test
-
 def empty_args():
     empty =  {'listen': False,
               'socket': False,
@@ -32,17 +22,20 @@ def empty_args():
               'cpu_list': None}
     return empty
 
-
-
-def unplug_cpus(cpu_list, interval, _uuid):
+# iperf3 -c 10.0.1.3 -P 8 -t 10 -i 10
+def run_iperf(server, cpu_list, cpu_count, cpu_interval, _uuid):
     hp_args = empty_args()
     hp_args['unplug'] = True
     hp_args['uuid'] = _uuid
     hp_args['socket'] = "/var/run/cpu_hotplug.sock"
     for cpu in cpu_list:
-        time.sleep(interval)
+        iperf_proc = Popen(["/usr/bin/iperf3",
+                           "-c", server,
+                           "-P", "{}".format(cpu_count),
+                           "-t", "{}".format(cpu_interval),
+                           "-i", "{}".format(cpu_interval)])
+        iperf_proc.wait()
         hp_args['cpu_list'] = [cpu]
-        print(hp_args)
         hotplug = HotPlug(hp_args)
         try:
             print("unplugging {}".format(cpu))
@@ -50,33 +43,20 @@ def unplug_cpus(cpu_list, interval, _uuid):
         except ParserError:
             parser.print_help()
 
-def plug_cpus(cpu_list, interval, _uuid):
-    hp_args = empty_args()
-    hp_args['plug'] = True
-    hp_args['uuid'] = _uuid
-    hp_args['socket'] = "/var/run/cpu_hotplug.sock"
     for cpu in cpu_list:
-        time.sleep(interval)
-        hp_args['cpu_list'] = [cpu]
-        hotplug = HotPlug(hp_args)
-        try:
-            print("re-plugging {}".format(cpu))
-            hotplug.client()
-        except ParserError:
-            parser.print_help()
 
-def shell_main(args):
+
+def iperf_main(args):
     parser = argparse.ArgumentParser()
+
     parser.add_argument('--cpu_list', action = 'store', nargs = '*', type = int, help = 'list of one or more cpus')
     parser.add_argument('--cpu_count', action = 'store', nargs = 1, type = int)
-    parser.add_argument('--stress_timeout', action = 'store', nargs = 1, type = int)
     parser.add_argument('--cpu_interval', action = 'store', nargs = 1, type = int)
     parser.add_argument('--uuid', action = 'store', nargs = 1)
+    parser.add_argument('--server', action = 'store', nargs = 1)
     vargs = vars(parser.parse_args())
-    run_stress(vargs['cpu_count'][0], vargs['stress_timeout'][0])
-    unplug_cpus(vargs['cpu_list'], vargs['cpu_interval'][0], vargs['uuid'])
-    plug_cpus(vargs['cpu_list'], vargs['cpu_interval'][0], vargs['uuid'])
+    print(vargs)
 
 if __name__ == "__main__":
-    shell_main(sys.argv)
+    iperf_main(sys.argv)
     sys.exit(0)
