@@ -270,18 +270,26 @@ static inline int check_version(struct hotplug_msg *m)
 
 static inline uint64_t read_timer(void)
 {
-	uint32_t hi, lo;
-	asm volatile("rdtsc\n\t" : "=a" (lo), "=d" (hi));
-	return ((uint64_t)(hi) << 32 | lo);
+	return get_jiffies_64();
 }
 
 static inline uint64_t cycles_elapsed(uint64_t begin, uint64_t end)
 {
-	uint64_t elapsed = end - begin;
-	if (end <= begin) {
-		return 0;
+	uint64_t elapsed = 0;
+	if (time_after(((unsigned long)end), ((unsigned long)begin))) {
+		if (end < begin) {
+			elapsed = (~0ULL - begin) + end;
+		}
+		else {
+			elapsed = end - begin;
+		}
 	}
 	return elapsed;
+}
+
+static inline uint64_t __attribute__((used)) msecs_elapsed(uint64_t begin, uint64_t end)
+{
+	return jiffies_to_msecs(cycles_elapsed(begin, end));
 }
 
 /**

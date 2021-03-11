@@ -144,7 +144,7 @@ static int handle_invalid(struct hotplug_msg *req, struct hotplug_msg *rep)
 	if (req && rep) {
 		init_reply(req, rep);
 		rep->result = EINVAL;
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 	}
 	return ccode;
 }
@@ -170,7 +170,7 @@ static int handle_discover(struct hotplug_msg *req, struct hotplug_msg *rep)
 	if (req && rep) {
 		init_reply(req, rep);
 		rep->result = OK;
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 		ccode = OK;
 	}
 	return ccode;
@@ -201,7 +201,7 @@ static int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 			ccode = OK;
 		}
 
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 		switch(ccode) {
 		case OK:
 		{
@@ -256,7 +256,7 @@ static int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 			ccode = OK;
 		}
 
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 		switch(ccode) {
 		case OK:
 		{
@@ -303,7 +303,7 @@ static int handle_get_boot_state(struct hotplug_msg *req, struct hotplug_msg *re
 	if (req && rep) {
 		init_reply(req, rep);
 		rep->current_state = (uint32_t)_cpu_report_state(req->cpu);
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 		rep->result = OK;
 		ccode = OK;
 	}
@@ -331,7 +331,7 @@ static int handle_get_cur_state(struct hotplug_msg *req, struct hotplug_msg *rep
 	if (req && rep) {
 		init_reply(req, rep);
 		ccode = read_cpu_state_file(req->cpu);
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 		if (ccode < 0) {
 			switch(ccode) {
 			case -ENOMEM:
@@ -379,7 +379,7 @@ static int handle_set_target_state(struct hotplug_msg *req, struct hotplug_msg *
 	if (req && rep) {
 		init_reply(req, rep);
 		ccode = write_cpu_target_file(req->cpu, req->target_state);
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 		if (ccode < 0) {
 			switch(ccode) {
 			case -EBADF:
@@ -447,7 +447,7 @@ static int handle_get_cpu_bitmasks(struct hotplug_msg *req, struct hotplug_msg *
 		copy_cpu_bitmask(dst, src);
 
 		spin_unlock_irqrestore(&bitmap_lock, flags);
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 
 		/**
 		 * store the number of of cpu IDs in the cpu field of the reply
@@ -481,7 +481,7 @@ static int handle_set_driver_uuid(struct hotplug_msg *req, struct hotplug_msg *r
 	if (req && rep) {
 		init_reply(req, rep);
 		uuid_copy(&driver_uuid, &(req->uuid));
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 		rep->result = OK;
 		ccode = OK;
 	}
@@ -506,7 +506,7 @@ static int handle_set_map_length(struct hotplug_msg *req, struct hotplug_msg *re
 	if (req && rep) {
 		init_reply(req, rep);
 		map_length = req->map_length;
-		rep->cycles = cycles_elapsed(req->cycles, read_timer());
+		rep->cycles = msecs_elapsed(req->cycles, read_timer());
 		rep->result = OK;
 		ccode = OK;
 	}
