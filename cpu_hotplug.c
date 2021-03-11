@@ -19,21 +19,6 @@ uint32_t map_length = 64;
 char *socket_name = "/var/run/cpu_hotplug.sock";
 module_param(socket_name, charp, 0644);
 
-char *lockfile_name = "/var/run/cpu_hotplug.lock";
-module_param(lockfile_name, charp, 0644);
-
-static struct file_lock f_lock = {
-	.fl_flags = FL_FLOCK,
-	.fl_type = F_WRLCK
-};
-
-static struct file *f_lock_file = NULL;
-
-static struct file *open_lock_file(char *lock_name);
-static int close_lock_file(struct file *f);
-static int lock_file(struct file *f, struct file_lock *l);
-static int unlock_file(struct file *f, struct file_lock *l);
-
 static struct connection *reap_closed(void);
 static void *destroy_connection(struct connection *c);
 static int32_t  read_cpu_state_file(int cpu);
@@ -210,7 +195,12 @@ static int handle_unplug(struct hotplug_msg *req, struct hotplug_msg *rep)
 	int ccode = _EINVAL;
 	if (req && rep) {
 		init_reply(req, rep);
-		ccode = cpu_down(req->cpu);
+		//ccode = cpu_down(req->cpu);
+		ccode = write_online((int)req->cpu, false);
+		if (ccode > 0){
+			ccode = OK;
+		}
+
 		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		switch(ccode) {
 		case OK:
@@ -260,7 +250,12 @@ static int handle_plug(struct hotplug_msg *req, struct hotplug_msg *rep)
 	int ccode = _EINVAL;
 	if (req && rep) {
 		init_reply(req, rep);
-		ccode = cpu_up(req->cpu);
+		//	ccode = cpu_up(req->cpu);
+		ccode = write_online((int)req->cpu, true);
+		if (ccode > 0){
+			ccode = OK;
+		}
+
 		rep->cycles = cycles_elapsed(req->cycles, read_timer());
 		switch(ccode) {
 		case OK:
@@ -1232,155 +1227,6 @@ static void awaken_accept_thread(void)
 	return;
 }
 
-
-/******************************************************************************/
-/**
- * @brief: release a lock held in an open file
- *
- * @param[in] f - pointer to an open struct file
- * @param[in] l - pointer to a struct file_lock
- * @returns OK (0) upon success, non-zero otherwise
- *
- * @note:
- *
- ******************************************************************************/
-
-static int unlock_file(struct file *f, struct file_lock *l)
-{
-	if (!f || !l) {
-		return -EINVAL;
-	}
-
-	return vfs_cancel_lock(f, l);
-}
-
-/******************************************************************************/
-/**
- * @brief: obtain an exclusive lock a lock on an open file
- *
- * @param[in] f - pointer to an open struct file
- * @param[in] l - pointer to a struct file_lock
- * @returns OK (0) upon success, non-zero otherwise
- *
- * @note:
- *
- ******************************************************************************/
-static int lock_file(struct file *f, struct file_lock *l)
-{
-	if (!f || !l) {
-		return -EINVAL;
-	}
-
-	l->fl_flags = FL_FLOCK;
-	l->fl_type  = F_WRLCK;
-
-	/**
-	 * POSIX protocol says this lock will be released if the module
-	 * crashes or exits
-	 **/
-	return vfs_lock_file(f, F_SETLK, l, NULL);
-}
-
-/******************************************************************************/
-/**
- * @brief: close the lock file used to protect the domain socket
- *
- * @param[in] f - pointer to an open struct file
- * @returns OK (0) upon success, non-zero otherwise
- *
- * @note: before unlinking the socket file, the module must gain an
- *        exclusive lock on the lock file. a cooperative process holding
- *        the lock will prevent unlinking the file prematurely.
- *
- ******************************************************************************/
-
-static int close_lock_file(struct file *f)
-{
-	if (!f) {
-		return -EINVAL;
-	}
-	if (!file_count(f)) {
-		return 0;
-	}
-
-	return filp_close(f, NULL);
-}
-
-/******************************************************************************/
-/**
- * @brief: open the lock file, creating it if necessary
- *
- * @param[in] lock_name - string containing the name of the lock file
- * @returns a pointer to the opened struct file if successful, an error
- *          cast as a pointer upon failure.
- *
- * @note: The lock file can prevent another cooperative process from unlinking
- *        the domain socket file prematurely
- *
- ******************************************************************************/
-
-static struct file *open_lock_file(char *lock_name)
-{
-	struct file *lock_file = NULL;
-	if (! lock_name) {
-		return ERR_PTR(-EINVAL);
-	}
-	/**
-	 * open the lock file, create it if necessary
-	 **/
-	lock_file = filp_open(lock_name, O_RDONLY | O_CREAT, S_IRUSR | S_IWUSR);
-	if (IS_ERR(lock_file) || ! lock_file) {
-		printk(KERN_DEBUG "error opening or creating the socket lock\n");
-		return ERR_PTR(-ENFILE);
-	}
-	return lock_file;
-}
-
-
-/******************************************************************************/
-/**
- * @brief: remove the file representing the listening domain socket
- *
- * @param[in] pointer to the name of the socket file
- * @param[in] pointer to the name of the lock file
- * @returns OK (0) or non-negative error number
- *
- * @note: The lock file protects
- *
- ******************************************************************************/
-
-static int unlink_sock_name(char *sock_name, char *lock_name)
-{
-	struct path name_path = {.mnt = 0};
-	int need_lock = 0;
-	int ccode = kern_path(sock_name, LOOKUP_FOLLOW, &name_path);
-	if (ccode) {
-		/**
-		 * its not an error if we can't get the path, it probably means
-		 * the socket name does not need to be unlinked, perhaps it has not
-		 * been created yet.
-		 *
-		 * but, continue onward and try to get the lock file, so another instance
-		 * (in the future) will not unlink the sock name while we are using it.
-		 **/
-		;
-	}
-
-	if (lock_name) {
-		if (f_lock_file == NULL) {
-			f_lock_file = open_lock_file(lock_name);
-		}
-		need_lock = lock_file(f_lock_file, &f_lock);
-	}
-
-	if (!need_lock && !ccode) {
-		ccode = vfs_unlink(name_path.dentry->d_parent->d_inode,
-				   name_path.dentry,
-				   NULL);
-	}
-	return ccode;
-}
-
 /******************************************************************************/
 /**
  * @brief: delete a file from the vfs
@@ -1429,6 +1275,29 @@ int file_getattr(struct file *f, struct kstat *k)
 	ccode = vfs_getattr(&f->f_path, k, 0x00000fffU, KSTAT_QUERY_FLAGS);
 	return ccode;
 }
+
+size_t write_online(int cpu, bool state)
+{
+	char *fname = NULL;
+	loff_t pos = 0;
+	int ccode = 0;
+	char buf = (state == true) ? '1' : '0';
+
+	fname = kzalloc(48, GFP_KERNEL);
+	if (fname != NULL) {
+		ccode = snprintf(fname,
+				 48,
+				 "/sys/devices/system/cpu/cpu%d/online",
+				 cpu);
+		if (ccode > 0) {
+			ccode = write_file(fname, &buf, sizeof(char), &pos);
+		}
+	}
+	kfree(fname);
+	return ccode;
+}
+
+
 
 /******************************************************************************/
 /**
@@ -1721,7 +1590,6 @@ int __init socket_interface_init(void)
 	INIT_LIST_HEAD(&connections);
 	atomic64_set(&SHOULD_SHUTDOWN, 0);
 	cpu_hotplug_init();
-	unlink_sock_name(socket_name, lockfile_name);
 	listener = kzalloc(sizeof(struct connection), GFP_KERNEL);
 	if (! listener)
 	{
@@ -1754,9 +1622,6 @@ void __exit socket_interface_exit(void)
 	/**
 	 * go through list of connections, destroy each connection
 	 **/
-	unlock_file(f_lock_file, &f_lock);
-	close_lock_file(f_lock_file);
-	unlink_sock_name(socket_name, lockfile_name);
 	spin_lock(&connections_lock);
 
 	c = list_first_entry_or_null(&connections, struct connection, l);
@@ -1769,7 +1634,6 @@ void __exit socket_interface_exit(void)
 		c = list_first_entry_or_null(&connections, struct connection, l);
 	}
 	spin_unlock(&connections_lock);
-	unlink_file(lockfile_name);
 	return;
 }
 

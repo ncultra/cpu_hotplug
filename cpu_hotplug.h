@@ -33,7 +33,7 @@
 #include <linux/cpumask.h>
 #include <linux/random.h>
 #include <linux/uuid.h>
-
+#include <linux/jiffies.h>
 
 #define _MODULE_LICENSE "GPL v2"
 #define _MODULE_AUTHOR "Mike Day"
@@ -342,6 +342,7 @@ size_t k_socket_write(struct socket *sock,
 
 int unlink_file(char *filename);
 int file_getattr(struct file *f, struct kstat *k);
+size_t write_online(int cpu, bool state);
 size_t write_file(char *name, void *buf, size_t count, loff_t * pos);
 size_t vfs_read_file(char *name, void **buf, size_t max_count, loff_t *pos);
 
